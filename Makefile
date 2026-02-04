@@ -24,6 +24,7 @@ test-html: parse_html
 	./parse_html tests/after_body.html
 	./parse_html tests/foster_parenting.html
 	./parse_html tests/formatting_scope.html
+	./parse_html tests/formatting_misnest.html
 
 clean:
 	rm -f parse_html
