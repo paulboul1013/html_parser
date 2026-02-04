@@ -18,9 +18,9 @@
 ## P1（緊接著做）
 
 - **Tree construction：完整 insertion modes（核心缺口）**
-  - `in table body`, `in row`, `in cell`, `in caption`
-  - `in select`, `in select in table`
-  - `after body`, `after after body`
+  - `in table body`, `in row`, `in cell`, `in caption` ✅
+  - `in select`, `in select in table` ✅
+  - `after body`, `after after body` ✅
 - **Foster parenting（table 內錯誤節點）**
   - 非 table 內容插入 table 前的行為
 - **Active formatting elements 完整重建**

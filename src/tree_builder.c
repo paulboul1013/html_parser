@@ -13,7 +13,13 @@ typedef enum {
     MODE_IN_BODY,
     MODE_IN_TABLE,
     MODE_IN_ROW,
-    MODE_IN_CELL
+    MODE_IN_CELL,
+    MODE_IN_TABLE_BODY,
+    MODE_IN_CAPTION,
+    MODE_IN_SELECT,
+    MODE_IN_SELECT_IN_TABLE,
+    MODE_AFTER_BODY,
+    MODE_AFTER_AFTER_BODY
 } insertion_mode;
 
 typedef enum {
@@ -87,6 +93,10 @@ static int stack_has_open_named(node_stack *st, const char *name) {
         if (n && n->name && strcmp(n->name, name) == 0) return 1;
     }
     return 0;
+}
+
+static int stack_has_open_table_section(node_stack *st) {
+    return stack_has_open_named(st, "thead") || stack_has_open_named(st, "tbody") || stack_has_open_named(st, "tfoot");
 }
 
 static void formatting_push(formatting_list *fl, fmt_tag tag) {
@@ -187,6 +197,11 @@ static int is_table_section_element(const char *name) {
 static int is_cell_element(const char *name) {
     if (!name) return 0;
     return strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
+}
+
+static int is_select_child_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "option") == 0 || strcmp(name, "optgroup") == 0;
 }
 
 static int is_body_block_like_start(const char *name) {
@@ -379,6 +394,15 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             ensure_body(doc, &st, &html, &body);
                             break;
                         }
+                        if (t->name && strcmp(t->name, "select") == 0) {
+                            ensure_body(doc, &st, &html, &body);
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT;
+                            break;
+                        }
                         if (t->name && strcmp(t->name, "table") == 0) {
                             ensure_body(doc, &st, &html, &body);
                             parent = current_node(&st, doc);
@@ -405,7 +429,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             n = node_create(NODE_ELEMENT, "caption", NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
-                            mode = MODE_IN_BODY;
+                            mode = MODE_IN_CAPTION;
                             break;
                         }
                         if (t->name && strcmp(t->name, "colgroup") == 0) {
@@ -421,11 +445,20 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             node_append_child(parent, n);
                             break;
                         }
+                        if (t->name && strcmp(t->name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
                         if (t->name && is_table_section_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            mode = MODE_IN_TABLE_BODY;
                             break;
                         }
                         if (t->name && strcmp(t->name, "tr") == 0) {
@@ -456,6 +489,41 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (!t->self_closing) {
                             stack_push(&st, n);
                         }
+                    } else if (mode == MODE_IN_TABLE_BODY) {
+                        if (t->name && is_table_section_element(t->name)) {
+                            if (stack_has_open_table_section(&st)) {
+                                stack_pop_until(&st, "thead");
+                                stack_pop_until(&st, "tbody");
+                                stack_pop_until(&st, "tfoot");
+                            }
+                            mode = MODE_IN_TABLE;
+                            reprocess = 1;
+                            break;
+                        }
+                        if (t->name && strcmp(t->name, "tr") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_ROW;
+                            break;
+                        }
+                        if (t->name && is_cell_element(t->name)) {
+                            parent = current_node(&st, doc);
+                            node *tr = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, tr);
+                            stack_push(&st, tr);
+                            node *cell = node_create(NODE_ELEMENT, t->name, NULL);
+                            node_append_child(tr, cell);
+                            stack_push(&st, cell);
+                            mode = MODE_IN_CELL;
+                            break;
+                        }
+                        if (!is_table_element(t->name)) {
+                            mode = MODE_IN_BODY;
+                            reprocess = 1;
+                            break;
+                        }
                     } else if (mode == MODE_IN_ROW) {
                         if (t->name && is_cell_element(t->name)) {
                             parent = current_node(&st, doc);
@@ -469,7 +537,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             if (stack_has_open_named(&st, "tr")) {
                                 stack_pop_until(&st, "tr");
                             }
-                            mode = MODE_IN_TABLE;
+                            mode = MODE_IN_TABLE_BODY;
                             reprocess = 1;
                             break;
                         }
@@ -479,6 +547,14 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
+                        if (t->name && strcmp(t->name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
                         if (t->name && is_cell_element(t->name)) {
                             close_cell(&st);
                             mode = MODE_IN_ROW;
@@ -487,9 +563,49 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                         if (t->name && (strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
                             close_cell(&st);
+                            mode = MODE_IN_TABLE_BODY;
+                            reprocess = 1;
+                            break;
+                        }
+                    } else if (mode == MODE_IN_CAPTION) {
+                        if (t->name && (strcmp(t->name, "table") == 0 || strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
+                            stack_pop_until(&st, "caption");
                             mode = MODE_IN_TABLE;
                             reprocess = 1;
                             break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t->self_closing) {
+                            stack_push(&st, n);
+                        }
+                        break;
+                    } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
+                        if (t->name && strcmp(t->name, "select") == 0) {
+                            /* ignore nested select */
+                            break;
+                        }
+                        if (t->name && is_select_child_element(t->name)) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, t->name, NULL);
+                            node_append_child(parent, n);
+                            if (!t->self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                        if (mode == MODE_IN_SELECT_IN_TABLE && t->name && is_table_element(t->name)) {
+                            stack_pop_until(&st, "select");
+                            mode = MODE_IN_TABLE;
+                            reprocess = 1;
+                            break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t->self_closing) {
+                            stack_push(&st, n);
                         }
                     }
                     break;
@@ -500,6 +616,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && strcmp(t->name, "body") == 0 && mode == MODE_IN_BODY) {
                         stack_pop_until(&st, "body");
+                        mode = MODE_AFTER_BODY;
                         break;
                     }
                     if (t->name && strcmp(t->name, "table") == 0) {
@@ -509,7 +626,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && strcmp(t->name, "tr") == 0 && mode == MODE_IN_ROW) {
                         stack_pop_until(&st, "tr");
-                        mode = MODE_IN_TABLE;
+                        mode = stack_has_open_table_section(&st) ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
                         break;
                     }
                     if (t->name && is_cell_element(t->name) && mode == MODE_IN_CELL) {
@@ -523,12 +640,30 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t->name && is_table_section_element(t->name) && mode == MODE_IN_TABLE) {
+                    if (t->name && is_table_section_element(t->name) && (mode == MODE_IN_TABLE || mode == MODE_IN_TABLE_BODY)) {
                         stack_pop_until(&st, t->name);
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "caption") == 0 && mode == MODE_IN_CAPTION) {
+                        stack_pop_until(&st, "caption");
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE)) {
+                        stack_pop_until(&st, "select");
+                        if (mode == MODE_IN_SELECT_IN_TABLE) {
+                            mode = (stack_has_open_named(&st, "td") || stack_has_open_named(&st, "th")) ? MODE_IN_CELL : MODE_IN_TABLE;
+                        } else {
+                            mode = MODE_IN_BODY;
+                        }
                         break;
                     }
                     if (t->name && strcmp(t->name, "html") == 0) {
                         stack_pop_until(&st, "html");
+                        if (mode == MODE_AFTER_BODY) {
+                            mode = MODE_AFTER_AFTER_BODY;
+                        }
                         break;
                     }
                     if (mode == MODE_IN_BODY) {
@@ -554,6 +689,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     if (t->data && t->data[0] != '\0') {
                         if (is_all_whitespace(t->data)) {
                             break;
+                        }
+                        if (mode == MODE_AFTER_BODY || mode == MODE_AFTER_AFTER_BODY) {
+                            mode = MODE_IN_BODY;
                         }
                         if (mode == MODE_IN_HEAD) {
                             if (!head) {
@@ -671,6 +809,15 @@ node *build_tree_from_input(const char *input) {
                             ensure_body(doc, &st, &html, &body);
                             break;
                         }
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            ensure_body(doc, &st, &html, &body);
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT;
+                            break;
+                        }
                         if (t.name && strcmp(t.name, "table") == 0) {
                             ensure_body(doc, &st, &html, &body);
                             parent = current_node(&st, doc);
@@ -697,7 +844,7 @@ node *build_tree_from_input(const char *input) {
                             n = node_create(NODE_ELEMENT, "caption", NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
-                            mode = MODE_IN_BODY;
+                            mode = MODE_IN_CAPTION;
                             break;
                         }
                         if (t.name && strcmp(t.name, "colgroup") == 0) {
@@ -713,11 +860,20 @@ node *build_tree_from_input(const char *input) {
                             node_append_child(parent, n);
                             break;
                         }
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
                         if (t.name && is_table_section_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            mode = MODE_IN_TABLE_BODY;
                             break;
                         }
                         if (t.name && strcmp(t.name, "tr") == 0) {
@@ -748,6 +904,41 @@ node *build_tree_from_input(const char *input) {
                         if (!t.self_closing) {
                             stack_push(&st, n);
                         }
+                    } else if (mode == MODE_IN_TABLE_BODY) {
+                        if (t.name && is_table_section_element(t.name)) {
+                            if (stack_has_open_table_section(&st)) {
+                                stack_pop_until(&st, "thead");
+                                stack_pop_until(&st, "tbody");
+                                stack_pop_until(&st, "tfoot");
+                            }
+                            mode = MODE_IN_TABLE;
+                            reprocess = 1;
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "tr") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_ROW;
+                            break;
+                        }
+                        if (t.name && is_cell_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            node *tr = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, tr);
+                            stack_push(&st, tr);
+                            node *cell = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(tr, cell);
+                            stack_push(&st, cell);
+                            mode = MODE_IN_CELL;
+                            break;
+                        }
+                        if (!is_table_element(t.name)) {
+                            mode = MODE_IN_BODY;
+                            reprocess = 1;
+                            break;
+                        }
                     } else if (mode == MODE_IN_ROW) {
                         if (t.name && is_cell_element(t.name)) {
                             parent = current_node(&st, doc);
@@ -761,7 +952,7 @@ node *build_tree_from_input(const char *input) {
                             if (stack_has_open_named(&st, "tr")) {
                                 stack_pop_until(&st, "tr");
                             }
-                            mode = MODE_IN_TABLE;
+                            mode = MODE_IN_TABLE_BODY;
                             reprocess = 1;
                             break;
                         }
@@ -771,6 +962,14 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
                         if (t.name && is_cell_element(t.name)) {
                             close_cell(&st);
                             mode = MODE_IN_ROW;
@@ -779,9 +978,48 @@ node *build_tree_from_input(const char *input) {
                         }
                         if (t.name && (strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
                             close_cell(&st);
+                            mode = MODE_IN_TABLE_BODY;
+                            reprocess = 1;
+                            break;
+                        }
+                    } else if (mode == MODE_IN_CAPTION) {
+                        if (t.name && (strcmp(t.name, "table") == 0 || strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
+                            stack_pop_until(&st, "caption");
                             mode = MODE_IN_TABLE;
                             reprocess = 1;
                             break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t.self_closing) {
+                            stack_push(&st, n);
+                        }
+                        break;
+                    } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            break;
+                        }
+                        if (t.name && is_select_child_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(parent, n);
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                        if (mode == MODE_IN_SELECT_IN_TABLE && t.name && is_table_element(t.name)) {
+                            stack_pop_until(&st, "select");
+                            mode = MODE_IN_TABLE;
+                            reprocess = 1;
+                            break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t.self_closing) {
+                            stack_push(&st, n);
                         }
                     }
                     break;
@@ -792,6 +1030,7 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && strcmp(t.name, "body") == 0 && mode == MODE_IN_BODY) {
                         stack_pop_until(&st, "body");
+                        mode = MODE_AFTER_BODY;
                         break;
                     }
                     if (t.name && strcmp(t.name, "table") == 0) {
@@ -801,7 +1040,7 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW) {
                         stack_pop_until(&st, "tr");
-                        mode = MODE_IN_TABLE;
+                        mode = stack_has_open_table_section(&st) ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
                         break;
                     }
                     if (t.name && is_cell_element(t.name) && mode == MODE_IN_CELL) {
@@ -815,12 +1054,30 @@ node *build_tree_from_input(const char *input) {
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_TABLE) {
+                    if (t.name && is_table_section_element(t.name) && (mode == MODE_IN_TABLE || mode == MODE_IN_TABLE_BODY)) {
                         stack_pop_until(&st, t.name);
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION) {
+                        stack_pop_until(&st, "caption");
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE)) {
+                        stack_pop_until(&st, "select");
+                        if (mode == MODE_IN_SELECT_IN_TABLE) {
+                            mode = (stack_has_open_named(&st, "td") || stack_has_open_named(&st, "th")) ? MODE_IN_CELL : MODE_IN_TABLE;
+                        } else {
+                            mode = MODE_IN_BODY;
+                        }
                         break;
                     }
                     if (t.name && strcmp(t.name, "html") == 0) {
                         stack_pop_until(&st, "html");
+                        if (mode == MODE_AFTER_BODY) {
+                            mode = MODE_AFTER_AFTER_BODY;
+                        }
                         break;
                     }
                     if (mode == MODE_IN_BODY) {
@@ -846,6 +1103,9 @@ node *build_tree_from_input(const char *input) {
                     if (t.data && t.data[0] != '\0') {
                         if (is_all_whitespace(t.data)) {
                             break;
+                        }
+                        if (mode == MODE_AFTER_BODY || mode == MODE_AFTER_AFTER_BODY) {
+                            mode = MODE_IN_BODY;
                         }
                         if (mode == MODE_IN_HEAD) {
                             if (!head) {

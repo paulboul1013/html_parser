@@ -62,7 +62,13 @@ HTML 的難點不是「把 `<tag>` 變成節點」，而是「不同 context 下
 - `before html`：沒有 html 就先補 html
 - `in head`：head 專屬元素，遇到非 head 元素要先關 head
 - `in body`：一般內容；避免巢狀 `<html>` / `<body>`
-- `in table`：最小 table 規則（table/tbody/tr/td/th）
+- `in table`：進入 table 的總入口（table/caption/colgroup/col/thead/tbody/tfoot/tr/td/th/select）
+- `in table body`：處理 `thead/tbody/tfoot` 中的 row/cell
+- `in row`：處理 `tr` 內的 cell
+- `in cell`：處理 `td/th` 內的一般內容
+- `in caption`：處理 `<caption>` 內的一般內容
+- `in select` / `in select in table`：select 的最小子元素規則
+- `after body` / `after after body`：`</body>` / `</html>` 後的容錯
 
 ## 6. 本專案的實作特性（你要記得的差異點）
 
@@ -129,7 +135,7 @@ HTMLPARSER_PARSE_ERRORS=1 ./html_parser/parse_html html_parser/parse_errors.html
 
 ### Tree construction 方向
 
-- 完整 insertion modes（`in table` 其實非常大）
+- 完整 insertion modes（仍有大量缺口，例如 `in template` / `in frameset` 等）
 - active formatting elements（`b/i/em/strong` 等重建規則，本版為簡化版）
 - template insertion mode stack
 - foreign content（SVG/MathML）命名空間與整合點

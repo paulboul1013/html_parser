@@ -6,7 +6,7 @@
 
 - [x] Tokenizer：支援 `<!DOCTYPE ...>`、start/end tag、attributes、`<!-- -->`、文字、EOF
 - [x] Tree：以 node tree 表示 `document/doctype/element/text/comment`
-- [x] 最小 insertion modes：`before html`、`in head`、`in body`、`in table`
+- [x] 最小 insertion modes（擴充）：`before html`、`in head`、`in body`、`in table`、`in table body`、`in row`、`in cell`、`in caption`、`in select`、`in select in table`、`after body`、`after after body`
 - [x] 視覺化：ASCII tree dump
 - [x] 測試：`make test`
 
@@ -149,15 +149,56 @@ make -C html_parser parse_file_demo
 - 在 `in body` 遇到 `<body>` 且 body 已存在：忽略該 start tag（避免巢狀 body）
 - 在 `in body` 遇到 `<table>`：建立 table、push，切換到 `in table`
 
-#### `MODE_IN_TABLE`（in table，最小處理）
+#### `MODE_IN_TABLE`（in table，擴充）
 
-- 支援的 table 相關元素（最小集合）：`table`, `tbody`, `tr`, `td`, `th`
+- 支援的 table 相關元素（最小集合）：`table`, `caption`, `colgroup`, `col`, `tbody`, `thead`, `tfoot`, `tr`, `td`, `th`
 - 在 `in table` 遇到：
-  - `<tbody>`：建立並 push
-  - `<tr>`：建立並 push
-  - `<td>`/`<th>`：建立並 push，並切回 `in body`（讓 cell 內容用 body 規則處理）
+  - `<caption>`：建立並 push，切到 `in caption`
+  - `<colgroup>`：建立並 push
+  - `<col>`：建立（不 push）
+  - `<tbody>/<thead>/<tfoot>`：建立並 push，切到 `in table body`
+  - `<tr>`：建立並 push，切到 `in row`
+  - `<td>/<th>`：建立並 push，切到 `in cell`
+  - `<select>`：建立並 push，切到 `in select in table`
   - `</table>`：pop 到 `table`，切回 `in body`
 - 在 `in table` 遇到非 table 元素：切回 `in body` 並重新處理
+
+#### `MODE_IN_TABLE_BODY`（in table body）
+
+- 目標：處理 `tbody/thead/tfoot` 內的 `tr/td/th`。
+- 遇到 `<tr>`：建立並 push，切到 `in row`
+- 遇到 `<td>/<th>`：自動補 `<tr>`，再插入 cell，切到 `in cell`
+- 遇到新的 `<tbody>/<thead>/<tfoot>`：關閉目前 section，切回 `in table` 並重新處理
+- 遇到非 table 元素：切回 `in body` 並重新處理
+
+#### `MODE_IN_ROW`（in row）
+
+- 遇到 `<td>/<th>`：建立並 push，切到 `in cell`
+- 遇到 `<tbody>/<thead>/<tfoot>`：先關閉 `tr`，切回 `in table body` 並重新處理
+- 遇到非 table 元素：切回 `in body` 並重新處理
+
+#### `MODE_IN_CELL`（in cell）
+
+- 遇到新的 `<td>/<th>`：先關閉目前 cell，切回 `in row` 並重新處理
+- 遇到 `<tr>` 或 `<tbody>/<thead>/<tfoot>`：先關閉 cell，切回 `in table body` 並重新處理
+
+#### `MODE_IN_CAPTION`（in caption）
+
+- 遇到 `<table>/<tr>/<tbody>/<thead>/<tfoot>`：關閉 caption，切回 `in table` 並重新處理
+- 其他 start tag：照一般元素插入（可巢狀）
+
+#### `MODE_IN_SELECT` / `MODE_IN_SELECT_IN_TABLE`
+
+- 只允許 `<option>/<optgroup>` 作為子元素（最小規則）
+- 遇到巢狀 `<select>`：忽略
+- `in select in table` 遇到 table 元素：先關閉 select，切回 `in table` 並重新處理
+- 遇到 `</select>`：關閉 select，回到 `in body` 或 `in table`
+
+#### `MODE_AFTER_BODY` / `MODE_AFTER_AFTER_BODY`
+
+- `</body>` 之後進入 `after body`
+- `</html>` 之後進入 `after after body`
+- 若仍有文字/元素：切回 `in body` 重新插入（確保產出 DOM）
 
 ## ASCII Tree 輸出格式
 
