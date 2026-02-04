@@ -30,7 +30,7 @@
 
 ## Non-goals（本版刻意不做）
 
-- 完整 WHATWG Tree Construction（含 active formatting elements、重建規則、Noah's Ark clause 等）
+- 完整 WHATWG Tree Construction（仍缺完整 adoption agency algorithm、template stack 等）
 - 完整 Tokenizer 狀態（RCDATA/RAWTEXT/script data、character references `&amp;` 解碼等）
 - Foreign content（SVG/MathML）的命名空間與整合點規則
 - HTML quirks/limited-quirks 的完整判定
@@ -117,14 +117,16 @@ make -C html_parser parse_file_demo
   - 若新 start tag 是 `dt`/`dd` 且對應元素尚未關閉：會先隱式關閉前一個 `dt`/`dd`。
   - 若新 start tag 是 `thead`/`tbody`/`tfoot`/`tr`/`td`/`th` 且同型元素尚未關閉：會先隱式關閉前一個。
 
-### Active Formatting Elements（簡化版）
+### Active Formatting Elements（擴充版，仍非完整）
 
-本版只實作最小「重建」規則，目標是避免 `b/i/em/strong` 的錯誤巢狀造成 DOM 斷裂。
+本版實作「重建 + scope 判斷 + Noah’s Ark clause（最小）」以改善常見格式化元素的錯誤巢狀。
 
 - 支援元素：`b`, `i`, `em`, `strong`
 - 行為：
   - start tag：若遇到格式化元素，記錄到 active list；插入前會嘗試重建（若 active list 中的元素不在 open stack，則重新插入）。
-  - end tag：若 stack 中不存在該格式化元素，忽略該 end tag；否則關閉到該元素為止。
+  - character / 非 formatting start tag：插入前會先重建 active formatting elements。
+  - Noah’s Ark：active list 中相同元素最多保留 3 筆，超過會移除最早的那筆。
+  - end tag：若目標元素不在 scope 中，忽略該 end tag；否則關閉到該元素為止，並同步移除 active list 中對應項目。
 
 ### 最小 insertion modes
 
@@ -199,6 +201,13 @@ make -C html_parser parse_file_demo
 - `</body>` 之後進入 `after body`
 - `</html>` 之後進入 `after after body`
 - 若仍有文字/元素：切回 `in body` 重新插入（確保產出 DOM）
+
+### Foster Parenting（table 內錯誤節點）
+
+當解析處於 table 相關模式，卻遇到「非 table 元素」或文字內容時：
+
+- 會把該節點插入到 **table 前**（table 的 parent 之下、table 之前）
+- 若目前 stack top 是非 table 元素，會把後續 token 以 `in body` 規則插入到該元素內
 
 ## ASCII Tree 輸出格式
 

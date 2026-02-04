@@ -22,6 +22,8 @@ test-html: parse_html
 	./parse_html tests/table_caption.html
 	./parse_html tests/select_in_table.html
 	./parse_html tests/after_body.html
+	./parse_html tests/foster_parenting.html
+	./parse_html tests/formatting_scope.html
 
 clean:
 	rm -f parse_html

@@ -22,6 +22,13 @@ typedef enum {
     MODE_AFTER_AFTER_BODY
 } insertion_mode;
 
+static int is_table_mode(insertion_mode mode) {
+    return mode == MODE_IN_TABLE ||
+           mode == MODE_IN_TABLE_BODY ||
+           mode == MODE_IN_ROW ||
+           mode == MODE_IN_CELL;
+}
+
 typedef enum {
     FMT_NONE = 0,
     FMT_B,
@@ -31,7 +38,12 @@ typedef enum {
 } fmt_tag;
 
 typedef struct {
-    fmt_tag items[64];
+    fmt_tag tag;
+    node *element;
+} formatting_entry;
+
+typedef struct {
+    formatting_entry items[64];
     size_t count;
 } formatting_list;
 
@@ -99,32 +111,88 @@ static int stack_has_open_table_section(node_stack *st) {
     return stack_has_open_named(st, "thead") || stack_has_open_named(st, "tbody") || stack_has_open_named(st, "tfoot");
 }
 
-static void formatting_push(formatting_list *fl, fmt_tag tag) {
+static int is_scoping_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "html") == 0 ||
+           strcmp(name, "table") == 0 ||
+           strcmp(name, "td") == 0 ||
+           strcmp(name, "th") == 0 ||
+           strcmp(name, "caption") == 0;
+}
+
+static int has_element_in_scope(node_stack *st, const char *name) {
+    if (!name) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (!n || !n->name) continue;
+        if (strcmp(n->name, name) == 0) return 1;
+        if (is_scoping_element(n->name)) return 0;
+    }
+    return 0;
+}
+
+static void formatting_remove_tag(formatting_list *fl, fmt_tag tag) {
     if (!fl || tag == FMT_NONE) return;
-    if (fl->count < sizeof(fl->items) / sizeof(fl->items[0])) {
-        fl->items[fl->count++] = tag;
+    for (size_t i = fl->count; i > 0; --i) {
+        if (fl->items[i - 1].tag == tag) {
+            for (size_t j = i; j < fl->count; ++j) {
+                fl->items[j - 1] = fl->items[j];
+            }
+            fl->count--;
+            return;
+        }
     }
 }
 
-static void formatting_pop_until(formatting_list *fl, fmt_tag tag) {
-    if (!fl || tag == FMT_NONE) return;
-    while (fl->count > 0) {
-        fmt_tag top = fl->items[fl->count - 1];
+static void formatting_push(formatting_list *fl, fmt_tag tag, node *element) {
+    if (!fl || tag == FMT_NONE || !element) return;
+    size_t count_same = 0;
+    size_t earliest_index = 0;
+    for (size_t i = 0; i < fl->count; ++i) {
+        if (fl->items[i].tag == tag) {
+            if (count_same == 0) earliest_index = i;
+            count_same++;
+        }
+    }
+    if (count_same >= 3) {
+        for (size_t j = earliest_index + 1; j < fl->count; ++j) {
+            fl->items[j - 1] = fl->items[j];
+        }
         fl->count--;
-        if (top == tag) return;
+    }
+    if (fl->count < sizeof(fl->items) / sizeof(fl->items[0])) {
+        fl->items[fl->count].tag = tag;
+        fl->items[fl->count].element = element;
+        fl->count++;
     }
 }
 
 static void reconstruct_active_formatting(node_stack *st, formatting_list *fl, node *parent) {
     if (!st || !fl || !parent) return;
-    for (size_t i = 0; i < fl->count; ++i) {
-        const char *name = fmt_tag_name(fl->items[i]);
-        if (name[0] == '\0') continue;
-        if (!stack_has_open_named(st, name)) {
-            node *n = node_create(NODE_ELEMENT, name, NULL);
-            node_append_child(parent, n);
-            stack_push(st, n);
+    if (fl->count == 0) return;
+    size_t idx = fl->count;
+    while (idx > 0) {
+        formatting_entry entry = fl->items[idx - 1];
+        if (entry.element && stack_contains(st, entry.element)) {
+            return;
         }
+        idx--;
+    }
+    size_t first = 0;
+    for (size_t i = fl->count; i > 0; --i) {
+        formatting_entry entry = fl->items[i - 1];
+        if (entry.element && stack_contains(st, entry.element)) {
+            first = i;
+            break;
+        }
+    }
+    for (size_t i = first; i < fl->count; ++i) {
+        const char *name = fmt_tag_name(fl->items[i].tag);
+        if (name[0] == '\0') continue;
+        node *n = node_create(NODE_ELEMENT, name, NULL);
+        node_append_child(parent, n);
+        stack_push(st, n);
+        fl->items[i].element = n;
     }
 }
 
@@ -162,6 +230,38 @@ static node *current_node(node_stack *st, node *doc) {
     node *top = stack_top(st);
     return top ? top : doc;
 }
+
+static node *find_open_table(node_stack *st) {
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (n && n->name && strcmp(n->name, "table") == 0) {
+            return n;
+        }
+    }
+    return NULL;
+}
+
+static node *foster_parent(node_stack *st, node *doc, node **table_out) {
+    node *table = find_open_table(st);
+    if (table_out) *table_out = table;
+    if (table && table->parent) {
+        return table->parent;
+    }
+    return current_node(st, doc);
+}
+
+static void foster_insert(node_stack *st, node *doc, node *child) {
+    node *table = NULL;
+    node *parent = foster_parent(st, doc, &table);
+    if (table && parent == table->parent) {
+        node_insert_before(parent, child, table);
+    } else {
+        node_append_child(parent, child);
+    }
+}
+
+static node *ensure_html(node *doc, node_stack *st, node **html_out);
+static node *ensure_body(node *doc, node_stack *st, node **html_out, node **body_out);
 
 static int is_head_element(const char *name) {
     if (!name) return 0;
@@ -261,6 +361,50 @@ static void body_autoclose_on_start(node_stack *st, const char *tag_name) {
     }
     if ((strcmp(tag_name, "td") == 0 || strcmp(tag_name, "th") == 0) && (stack_has_open_named(st, "td") || stack_has_open_named(st, "th"))) {
         stack_pop_until_any(st, "td", "th");
+    }
+}
+
+static void handle_in_body_start(const char *name, int self_closing, node *doc, node_stack *st, node **html, node **body,
+                                 formatting_list *fmt, insertion_mode *mode) {
+    if (!mode) return;
+    fmt_tag ft = fmt_tag_from_name(name);
+    if (ft != FMT_NONE) {
+        node *parent = current_node(st, doc);
+        reconstruct_active_formatting(st, fmt, parent);
+    }
+    if (name && strcmp(name, "html") == 0) {
+        return;
+    }
+    if (name && strcmp(name, "body") == 0) {
+        ensure_body(doc, st, html, body);
+        return;
+    }
+    if (name && strcmp(name, "select") == 0) {
+        ensure_body(doc, st, html, body);
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "select", NULL);
+        node_append_child(parent, n);
+        stack_push(st, n);
+        *mode = MODE_IN_SELECT;
+        return;
+    }
+    if (name && strcmp(name, "table") == 0) {
+        ensure_body(doc, st, html, body);
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "table", NULL);
+        node_append_child(parent, n);
+        stack_push(st, n);
+        *mode = MODE_IN_TABLE;
+        return;
+    }
+    body_autoclose_on_start(st, name);
+    ensure_body(doc, st, html, body);
+    node *parent = current_node(st, doc);
+    node *n = node_create(NODE_ELEMENT, name ? name : "", NULL);
+    node_append_child(parent, n);
+    if (!self_closing) {
+        stack_push(st, n);
+        if (ft != FMT_NONE) formatting_push(fmt, ft, n);
     }
 }
 
@@ -382,45 +526,15 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                     }
+                    if (is_table_mode(mode)) {
+                        node *cur = current_node(&st, doc);
+                        if (cur && cur->name && !is_table_element(cur->name)) {
+                            handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
+                            break;
+                        }
+                    }
                     if (mode == MODE_IN_BODY) {
-                        fmt_tag ft = fmt_tag_from_name(t->name);
-                        if (ft != FMT_NONE) {
-                            reconstruct_active_formatting(&st, &fmt, parent);
-                        }
-                        if (t->name && strcmp(t->name, "html") == 0) {
-                            break;
-                        }
-                        if (t->name && strcmp(t->name, "body") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            break;
-                        }
-                        if (t->name && strcmp(t->name, "select") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            parent = current_node(&st, doc);
-                            n = node_create(NODE_ELEMENT, "select", NULL);
-                            node_append_child(parent, n);
-                            stack_push(&st, n);
-                            mode = MODE_IN_SELECT;
-                            break;
-                        }
-                        if (t->name && strcmp(t->name, "table") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            parent = current_node(&st, doc);
-                            n = node_create(NODE_ELEMENT, "table", NULL);
-                            node_append_child(parent, n);
-                            stack_push(&st, n);
-                            mode = MODE_IN_TABLE;
-                            break;
-                        }
-                        body_autoclose_on_start(&st, t->name);
-                        ensure_body(doc, &st, &html, &body);
-                        parent = current_node(&st, doc);
-                        n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
-                        node_append_child(parent, n);
-                        if (!t->self_closing) {
-                            stack_push(&st, n);
-                            if (ft != FMT_NONE) formatting_push(&fmt, ft);
-                        }
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -478,8 +592,22 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (!is_table_element(t->name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t->name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t->self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_HEAD) {
@@ -520,8 +648,22 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (!is_table_element(t->name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t->name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t->self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_ROW) {
@@ -542,8 +684,22 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (!is_table_element(t->name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t->name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t->self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
@@ -567,6 +723,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             reprocess = 1;
                             break;
                         }
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t->name && (strcmp(t->name, "table") == 0 || strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
                             stack_pop_until(&st, "caption");
@@ -669,10 +826,10 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     if (mode == MODE_IN_BODY) {
                         fmt_tag ft = fmt_tag_from_name(t->name);
                         if (ft != FMT_NONE) {
-                            if (!stack_has_open_named(&st, t->name)) {
+                            if (!has_element_in_scope(&st, t->name)) {
                                 break;
                             }
-                            formatting_pop_until(&fmt, ft);
+                            formatting_remove_tag(&fmt, ft);
                         }
                     }
                     if (t->name && !stack_has_open_named(&st, t->name)) {
@@ -704,9 +861,25 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             node_append_child(parent, n);
                             break;
                         }
+                        if (is_table_mode(mode)) {
+                            node *cur = current_node(&st, doc);
+                            if (mode == MODE_IN_CELL || (cur && cur->name && !is_table_element(cur->name))) {
+                                parent = cur;
+                                n = node_create(NODE_TEXT, NULL, t->data);
+                                node_append_child(parent, n);
+                                break;
+                            }
+                            n = node_create(NODE_TEXT, NULL, t->data);
+                            foster_insert(&st, doc, n);
+                            break;
+                        }
                         if (mode == MODE_INITIAL || mode == MODE_BEFORE_HTML) {
                             ensure_body(doc, &st, &html, &body);
                             mode = MODE_IN_BODY;
+                        }
+                        if (mode == MODE_IN_BODY) {
+                            parent = current_node(&st, doc);
+                            reconstruct_active_formatting(&st, &fmt, parent);
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_TEXT, NULL, t->data);
@@ -797,45 +970,15 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                     }
+                    if (is_table_mode(mode)) {
+                        node *cur = current_node(&st, doc);
+                        if (cur && cur->name && !is_table_element(cur->name)) {
+                            handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
+                            break;
+                        }
+                    }
                     if (mode == MODE_IN_BODY) {
-                        fmt_tag ft = fmt_tag_from_name(t.name);
-                        if (ft != FMT_NONE) {
-                            reconstruct_active_formatting(&st, &fmt, parent);
-                        }
-                        if (t.name && strcmp(t.name, "html") == 0) {
-                            break;
-                        }
-                        if (t.name && strcmp(t.name, "body") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            break;
-                        }
-                        if (t.name && strcmp(t.name, "select") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            parent = current_node(&st, doc);
-                            n = node_create(NODE_ELEMENT, "select", NULL);
-                            node_append_child(parent, n);
-                            stack_push(&st, n);
-                            mode = MODE_IN_SELECT;
-                            break;
-                        }
-                        if (t.name && strcmp(t.name, "table") == 0) {
-                            ensure_body(doc, &st, &html, &body);
-                            parent = current_node(&st, doc);
-                            n = node_create(NODE_ELEMENT, "table", NULL);
-                            node_append_child(parent, n);
-                            stack_push(&st, n);
-                            mode = MODE_IN_TABLE;
-                            break;
-                        }
-                        body_autoclose_on_start(&st, t.name);
-                        ensure_body(doc, &st, &html, &body);
-                        parent = current_node(&st, doc);
-                        n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
-                        node_append_child(parent, n);
-                        if (!t.self_closing) {
-                            stack_push(&st, n);
-                            if (ft != FMT_NONE) formatting_push(&fmt, ft);
-                        }
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -893,8 +1036,22 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (!is_table_element(t.name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t.name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_HEAD) {
@@ -935,8 +1092,22 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (!is_table_element(t.name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t.name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_ROW) {
@@ -957,8 +1128,22 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (!is_table_element(t.name)) {
-                            mode = MODE_IN_BODY;
-                            reprocess = 1;
+                            fmt_tag ft = fmt_tag_from_name(t.name);
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            if (ft != FMT_NONE) {
+                                reconstruct_active_formatting(&st, &fmt, fp);
+                            }
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                                if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
@@ -982,6 +1167,7 @@ node *build_tree_from_input(const char *input) {
                             reprocess = 1;
                             break;
                         }
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && (strcmp(t.name, "table") == 0 || strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
                             stack_pop_until(&st, "caption");
@@ -1083,10 +1269,10 @@ node *build_tree_from_input(const char *input) {
                     if (mode == MODE_IN_BODY) {
                         fmt_tag ft = fmt_tag_from_name(t.name);
                         if (ft != FMT_NONE) {
-                            if (!stack_has_open_named(&st, t.name)) {
+                            if (!has_element_in_scope(&st, t.name)) {
                                 break;
                             }
-                            formatting_pop_until(&fmt, ft);
+                            formatting_remove_tag(&fmt, ft);
                         }
                     }
                     if (t.name && !stack_has_open_named(&st, t.name)) {
@@ -1118,9 +1304,25 @@ node *build_tree_from_input(const char *input) {
                             node_append_child(parent, n);
                             break;
                         }
+                        if (is_table_mode(mode)) {
+                            node *cur = current_node(&st, doc);
+                            if (mode == MODE_IN_CELL || (cur && cur->name && !is_table_element(cur->name))) {
+                                parent = cur;
+                                n = node_create(NODE_TEXT, NULL, t.data);
+                                node_append_child(parent, n);
+                                break;
+                            }
+                            n = node_create(NODE_TEXT, NULL, t.data);
+                            foster_insert(&st, doc, n);
+                            break;
+                        }
                         if (mode == MODE_INITIAL || mode == MODE_BEFORE_HTML) {
                             ensure_body(doc, &st, &html, &body);
                             mode = MODE_IN_BODY;
+                        }
+                        if (mode == MODE_IN_BODY) {
+                            parent = current_node(&st, doc);
+                            reconstruct_active_formatting(&st, &fmt, parent);
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_TEXT, NULL, t.data);

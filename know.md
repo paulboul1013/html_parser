@@ -69,6 +69,7 @@ HTML 的難點不是「把 `<tag>` 變成節點」，而是「不同 context 下
 - `in caption`：處理 `<caption>` 內的一般內容
 - `in select` / `in select in table`：select 的最小子元素規則
 - `after body` / `after after body`：`</body>` / `</html>` 後的容錯
+- Foster parenting：table 內的非 table 內容會被「插到 table 前」
 
 ## 6. 本專案的實作特性（你要記得的差異點）
 
@@ -90,6 +91,10 @@ HTML 的難點不是「把 `<tag>` 變成節點」，而是「不同 context 下
 - Character references（擴充）：
   - Named entities 讀自 `entities.tsv`（已填入完整 WHATWG 列表）
   - 無分號容錯只在下一字元不是英數、也不是 `=` 時解碼
+- Active formatting elements（擴充版）：
+  - `b/i/em/strong` 具備重建 + scope 判斷
+  - Noah’s Ark clause：同一元素在 active list 最多保留 3 筆
+  - 文字與非 formatting start tag 插入前都會先重建 AFE
 
 ## 7. 怎麼驗證目前行為（你的檢查點）
 

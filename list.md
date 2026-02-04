@@ -22,10 +22,10 @@
   - `in select`, `in select in table` ✅
   - `after body`, `after after body` ✅
 - **Foster parenting（table 內錯誤節點）**
-  - 非 table 內容插入 table 前的行為
+  - 非 table 內容插入 table 前的行為 ✅
 - **Active formatting elements 完整重建**
-  - Noah’s Ark clause
-  - Scope 概念與正確重建
+  - Noah’s Ark clause ✅
+  - Scope 概念與正確重建 ✅
 
 ## P2（中期補完）
 

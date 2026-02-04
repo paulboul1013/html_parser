@@ -36,6 +36,30 @@ void node_append_child(node *parent, node *child) {
     parent->last_child = child;
 }
 
+void node_insert_before(node *parent, node *child, node *ref) {
+    if (!parent || !child) return;
+    child->parent = parent;
+    if (!ref || !parent->first_child) {
+        node_append_child(parent, child);
+        return;
+    }
+    if (parent->first_child == ref) {
+        child->next_sibling = ref;
+        parent->first_child = child;
+        return;
+    }
+    node *prev = parent->first_child;
+    while (prev && prev->next_sibling && prev->next_sibling != ref) {
+        prev = prev->next_sibling;
+    }
+    if (!prev || !prev->next_sibling) {
+        node_append_child(parent, child);
+        return;
+    }
+    child->next_sibling = ref;
+    prev->next_sibling = child;
+}
+
 void node_free(node *n) {
     node *child;
     node *next;
