@@ -28,7 +28,7 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    const char *path = (argc > 1) ? argv[1] : "sample.html";
+    const char *path = (argc > 1) ? argv[1] : "tests/sample.html";
     char *input = read_file(path);
     if (!input) {
         fprintf(stderr, "failed to read %s\n", path);
