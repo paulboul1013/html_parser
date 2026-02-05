@@ -40,7 +40,8 @@ typedef enum {
     FMT_B,
     FMT_I,
     FMT_EM,
-    FMT_STRONG
+    FMT_STRONG,
+    FMT_MARKER          /* sentinel: pushed at td/th/caption boundaries */
 } fmt_tag;
 
 typedef struct {
@@ -173,26 +174,55 @@ static void formatting_push(formatting_list *fl, fmt_tag tag, node *element) {
     }
 }
 
+/* Push a marker onto the active-formatting list (at td/th/caption entry). */
+static void formatting_push_marker(formatting_list *fl) {
+    if (!fl) return;
+    if (fl->count < sizeof(fl->items) / sizeof(fl->items[0])) {
+        fl->items[fl->count].tag    = FMT_MARKER;
+        fl->items[fl->count].element = NULL;
+        fl->count++;
+    }
+}
+
+/* Remove entries from the end of the list until (and including) the last marker.
+   If no marker is found the entire list is cleared. */
+static void formatting_clear_to_marker(formatting_list *fl) {
+    if (!fl) return;
+    while (fl->count > 0) {
+        fl->count--;
+        if (fl->items[fl->count].tag == FMT_MARKER) {
+            return;     /* marker itself is also removed */
+        }
+    }
+}
+
 static void reconstruct_active_formatting(node_stack *st, formatting_list *fl, node *parent) {
     if (!st || !fl || !parent) return;
     if (fl->count == 0) return;
-    size_t idx = fl->count;
-    while (idx > 0) {
-        formatting_entry entry = fl->items[idx - 1];
-        if (entry.element && stack_contains(st, entry.element)) {
-            return;
-        }
-        idx--;
+
+    /* Per WHATWG: if the last entry is a marker or is already on the open-
+       element stack there is nothing to reconstruct. */
+    {
+        formatting_entry *last = &fl->items[fl->count - 1];
+        if (last->tag == FMT_MARKER) return;
+        if (last->element && stack_contains(st, last->element)) return;
     }
+
+    /* Walk backwards to find the boundary: stop at a marker or at an entry
+       that is still on the stack.  'first' is the index we start from. */
     size_t first = 0;
-    for (size_t i = fl->count; i > 0; --i) {
-        formatting_entry entry = fl->items[i - 1];
-        if (entry.element && stack_contains(st, entry.element)) {
+    for (size_t i = fl->count - 1; i > 0; --i) {
+        formatting_entry *e = &fl->items[i - 1];
+        if (e->tag == FMT_MARKER ||
+            (e->element && stack_contains(st, e->element))) {
             first = i;
             break;
         }
     }
+
+    /* Reconstruct each entry in [first, count).  Markers are skipped. */
     for (size_t i = first; i < fl->count; ++i) {
+        if (fl->items[i].tag == FMT_MARKER) continue;
         const char *name = fmt_tag_name(fl->items[i].tag);
         if (name[0] == '\0') continue;
         node *n = node_create(NODE_ELEMENT, name, NULL);
@@ -656,11 +686,12 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     }
 }
 
-static void close_cell(node_stack *st) {
+static void close_cell(node_stack *st, formatting_list *fl) {
     if (!stack_has_open_named(st, "td") && !stack_has_open_named(st, "th")) {
         return;
     }
     stack_pop_until_any(st, "td", "th");
+    formatting_clear_to_marker(fl);     /* clear active-formatting back to the cell marker */
 }
 
 static int is_all_whitespace(const char *s) {
@@ -796,6 +827,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             n = node_create(NODE_ELEMENT, "caption", NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CAPTION;
                             break;
                         }
@@ -841,6 +873,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             n = node_create(NODE_ELEMENT, t->name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -897,6 +930,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             node *cell = node_create(NODE_ELEMENT, t->name, NULL);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -925,6 +959,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             n = node_create(NODE_ELEMENT, t->name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -965,13 +1000,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (t->name && is_cell_element(t->name)) {
-                            close_cell(&st);
+                            close_cell(&st, &fmt);
                             mode = MODE_IN_ROW;
                             reprocess = 1;
                             break;
                         }
                         if (t->name && (strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
-                            close_cell(&st);
+                            close_cell(&st, &fmt);
                             mode = MODE_IN_TABLE_BODY;
                             reprocess = 1;
                             break;
@@ -1030,6 +1065,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         break;
                     }
                     if (t->name && strcmp(t->name, "table") == 0) {
+                        if (mode == MODE_IN_CELL) {
+                            formatting_clear_to_marker(&fmt);
+                        }
                         stack_pop_until(&st, "table");
                         mode = MODE_IN_BODY;
                         break;
@@ -1041,11 +1079,12 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && is_cell_element(t->name) && mode == MODE_IN_CELL) {
                         stack_pop_until(&st, t->name);
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
                     if (t->name && is_table_section_element(t->name) && mode == MODE_IN_CELL) {
-                        close_cell(&st);
+                        close_cell(&st, &fmt);
                         stack_pop_until(&st, t->name);
                         mode = MODE_IN_TABLE;
                         break;
@@ -1057,6 +1096,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && strcmp(t->name, "caption") == 0 && mode == MODE_IN_CAPTION) {
                         stack_pop_until(&st, "caption");
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
                         break;
                     }
@@ -1249,6 +1289,7 @@ node *build_tree_from_input(const char *input) {
                             n = node_create(NODE_ELEMENT, "caption", NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CAPTION;
                             break;
                         }
@@ -1294,6 +1335,7 @@ node *build_tree_from_input(const char *input) {
                             n = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -1350,6 +1392,7 @@ node *build_tree_from_input(const char *input) {
                             node *cell = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -1378,6 +1421,7 @@ node *build_tree_from_input(const char *input) {
                             n = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -1418,13 +1462,13 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (t.name && is_cell_element(t.name)) {
-                            close_cell(&st);
+                            close_cell(&st, &fmt);
                             mode = MODE_IN_ROW;
                             reprocess = 1;
                             break;
                         }
                         if (t.name && (strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
-                            close_cell(&st);
+                            close_cell(&st, &fmt);
                             mode = MODE_IN_TABLE_BODY;
                             reprocess = 1;
                             break;
@@ -1482,6 +1526,9 @@ node *build_tree_from_input(const char *input) {
                         break;
                     }
                     if (t.name && strcmp(t.name, "table") == 0) {
+                        if (mode == MODE_IN_CELL) {
+                            formatting_clear_to_marker(&fmt);
+                        }
                         stack_pop_until(&st, "table");
                         mode = MODE_IN_BODY;
                         break;
@@ -1493,11 +1540,12 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && is_cell_element(t.name) && mode == MODE_IN_CELL) {
                         stack_pop_until(&st, t.name);
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
                     if (t.name && is_table_section_element(t.name) && mode == MODE_IN_CELL) {
-                        close_cell(&st);
+                        close_cell(&st, &fmt);
                         stack_pop_until(&st, t.name);
                         mode = MODE_IN_TABLE;
                         break;
@@ -1509,6 +1557,7 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION) {
                         stack_pop_until(&st, "caption");
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
                         break;
                     }
@@ -1680,6 +1729,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             n = node_create(NODE_ELEMENT, "caption", NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CAPTION;
                             break;
                         }
@@ -1747,6 +1797,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             node *cell = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -1764,6 +1815,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             n = node_create(NODE_ELEMENT, t.name, NULL);
                             node_append_child(parent, n);
                             stack_push(&st, n);
+                            formatting_push_marker(&fmt);
                             mode = MODE_IN_CELL;
                             break;
                         }
@@ -1777,7 +1829,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                     } else if (mode == MODE_IN_CELL) {
                         if (t.name && is_cell_element(t.name)) {
-                            close_cell(&st);
+                            close_cell(&st, &fmt);
                             mode = MODE_IN_ROW;
                             reprocess = 1;
                             break;
@@ -1840,12 +1892,16 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     }
                     /* End-tag mode transitions for table/cell/row/section/select/caption */
                     if (t.name && strcmp(t.name, "table") == 0 && stack_has_open_named(&st, "table")) {
+                        if (mode == MODE_IN_CELL) {
+                            formatting_clear_to_marker(&fmt);
+                        }
                         stack_pop_until(&st, "table");
                         mode = MODE_IN_BODY;
                         break;
                     }
                     if (t.name && is_cell_element(t.name) && (mode == MODE_IN_CELL) && stack_has_open_named(&st, t.name)) {
                         stack_pop_until(&st, t.name);
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
@@ -1862,6 +1918,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     }
                     if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && stack_has_open_named(&st, "caption")) {
                         stack_pop_until(&st, "caption");
+                        formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
                         break;
                     }

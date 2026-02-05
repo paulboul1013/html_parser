@@ -208,6 +208,19 @@
 - **Noah's Ark clause**：active list 中相同元素最多保留 3 筆，超過會移除最早的那筆。
 - **End tag**：若目標元素不在 scope 中則忽略；否則關閉到該元素為止，並同步移除 active list 中對應項目。
 
+#### Marker 機制（Cell / Caption 邊界隔離）
+
+Per WHATWG，active formatting list 裡會在特定元素進入時插入 **marker** 作為隔離哨兵：
+
+| 插入 marker 的時機 | 清除到 marker 的時機 |
+|--------------------|--------------------|
+| `<td>` / `<th>` 進入（mode → IN_CELL） | `</td>` / `</th>` 結束、`close_cell`、`</table>` 在 IN_CELL 時 |
+| `<caption>` 進入（mode → IN_CAPTION） | `</caption>` 結束 |
+
+**Reconstruction 遇到 marker 會停止**：只會重建 marker 之後的列表項，marker 之前的格式化元素不會被觸動。這保證了「table cell 內開的格式化元素不會在 cell 關閉後外溢」。
+
+實作細節見 `src/tree_builder.c` 中的 `formatting_push_marker()`、`formatting_clear_to_marker()`、`reconstruct_active_formatting()` 三個函數。
+
 ### 5.6 Adoption Agency 算法
 
 處理 `b`/`i`/`em`/`strong` 等格式化元素的錯誤巢狀情況。當 end tag 對應的 open element 不是 current node 時，算法會將內容正確地從巢狀結構中脫離並重新組織，確保輸出樹的語義正確。
@@ -307,3 +320,76 @@ DOCUMENT
 - Tree 釋放要用 `node_free()`（會遞迴釋放）。
 - 輸入為 UTF-8 bytes，本版不做 encoding sniffing，直接當作 `char*` 字串處理。
 - 不支持外國內容：SVG 與 MathML 元素未被特別處理，視為普通 HTML 元素。
+
+---
+
+## 10. Fragment 測資驗證記錄
+
+以下為 `tests/frag_*` 測資經 **html5lib**（WHATWG 參考實現）交叉驗證後的結論。
+html5lib 輸出均以 `parser.parseFragment(html, context_tag)` 取得，與本 parser 逐樹比對。
+
+### 驗證方法
+
+```python
+from html5lib import HTMLParser
+doc = HTMLParser().parseFragment(input_html, context_tag)
+```
+
+### 逐條結論
+
+| 編號 | 判定 | 說明 |
+|------|------|------|
+| 01 | ✅ | `<tr><td>` 在 div context 下均被忽略，文字直接輸出。測名 "ignored" 未錯，但 "tags ignored, text preserved" 更精確。 |
+| 02a | ✅ | `<td>` 在 table context：隱式生成 `<tbody><tr>` 正確。 |
+| 02b | ✅ | `<td>` 在 tr context：直接進入 IN_ROW 插入，正確。 |
+| 03 | ✅ | Foster parenting：`<p>` 和文字被移出 table 前方，html5lib 同樣。 |
+| 04 | ✅ | `<b><i>X</b>Y</i>`：AAA 觸發於 `</b>`，無 furthest block，直接 pop 並調整 active list。`<i>` 在 `Y` 前被重建。本 parser 與 html5lib 輸出一致。 |
+| 05 | ✅ | `<table>` 隱式關閉 `<p>`，正確。 |
+| 06 | ✅ | IN_SELECT 中新 `<option>` 先關閉前一個，正確。 |
+| 07 | ✅ | `<button><p>X</button>Y`：tree construction 算法將 `<p>` 插入 `<button>` 內（current node）。`<p>` 的 **content model** 不允許在 `<button>` 中，但 tree construction 不做 content model 驗證，只做插入規則。`</button>` 時隱式關閉 `<p>`。DOM 結果與 html5lib 一致。 |
+| 08 | ✅ | `<script>var x="</script>";</script>`：**本 parser 輸出正確，reviewer 的分析是錯的。** SCRIPT_DATA 狀態下第一個 `</script>` 無條件關閉 script（不理解 JS 字串語法）。script 內容為 `var x="`，之後 `"` 和 `;` 成為 DATA 狀態下的字元 token，第二個 `</script>` 為孤兒 end tag被忽略。所以桌外文字確實是 `";`（含引號），display 格式 `TEXT data="";"` 是正確的——引號本身就是數據的一部分。html5lib 輸出完全相同。 |
+| 09 | ✅ | RCDATA 裡的 tag 不解析，字元參考才會 decode。正確。 |
+| 10 | ⚠️ | `<template>` 測資期望為理想值。本 parser 有 template content wrapper 的初步實作，但 template insertion mode stack 還非完整 spec 行為。測資本身標記為 KNOWN。 |
+| 11 | ✅ | `<meta>` 為 void element，不進 stack。`<title>` 為 sibling。正確。 |
+| 12 | ✅ (修補後) | 見下方「12 號修補」說明。 |
+
+### 12 號測資：修補過程記錄
+
+**輸入**：`<table><tr><td><b>X<p>Y</table>Z`（context = div）
+
+**修補前**（Bug）：
+```
+table > tbody > tr > td > b > "X", p > "Y"
+b > "Z"                          ← 錯：Z 不應被 <b> 包住
+```
+
+**修補後**（正確，與 html5lib 一致）：
+```
+table > tbody > tr > td > b > "X", p > "Y"
+"Z"                              ← 裸文本，正確
+```
+
+**Root cause**：`formatting_list`（活躍格式化列表）沒有 marker 機制。`<td>` 進入時應插入 marker；關閉 cell 時應清除到 marker。修補前，`<b>` 從 cell 內泄露到 active list，在 table 關閉後觸發 reconstruction，錯誤地包住 `Z`。
+
+**修補內容**（均在 `src/tree_builder.c`）：
+1. `FMT_MARKER` 加入 `fmt_tag` enum。
+2. `formatting_push_marker()` / `formatting_clear_to_marker()` 兩個新函數。
+3. `reconstruct_active_formatting()` 改寫：遇到 marker 停止回溯，不跨 marker 重建。
+4. `close_cell()` 加入 `formatting_list *` 參數，內部調用 `clear_to_marker`。
+5. 在 td/th/caption 建立點插入 marker（共 8 處 cell + 3 處 caption）。
+6. 在 `</td>`、`</th>`、`</caption>`、`</table>`（IN_CELL 時）處理裡清除到 marker。
+
+**Reviewer 分析中的錯誤**：
+- 08 號：reviewer 說多了一個 `"`，實際是 parser 正確。`"` 是 `</script>` 之後第一個字元，屬於合法 text。
+- 12 號：reviewer 說 `<p>` 會被 foster-parented（移到 table 外）。實際上 `<p>` 在 IN_CELL 裡以 IN_BODY 規則插入，不觸發 foster parenting。`<p>` 正確地留在 `<td><b>` 裡。html5lib 輸出同樣確認。reviewer 的「正確 DOM」裡 `<p>` 在 table 外是錯的；唯一的bug 是 `<b>` 包住 `Z`。
+
+### 交叉驗證用的輸入與標準輸出
+
+| 輸入（context=div） | html5lib 輸出（精要） |
+|---------------------|-----------------------|
+| `<table><tr><td><b>X</table>Y` | table 內 b>X；table 外裸文本 Y |
+| `<table><tr><td><b>X<p>Y</table>Z` | table 內 b>X, p>Y；table 外裸文本 Z |
+| `<b>A<table><tr><td>X</td></tr></table>B</b>` | 外層 b 包所有：A, table(X), B |
+| `<b>A<table><tr><td><b>X</td></tr></table>B</b>` | 外層 b 包所有：A, table(內層 b>X), B |
+
+以上四組均用 html5lib 1.1（Python）取得，本 parser 修補後全部一致。
