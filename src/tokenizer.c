@@ -479,6 +479,9 @@ static void parse_comment(tokenizer *tz, token *out) {
 static void parse_doctype(tokenizer *tz, token *out) {
     size_t name_start;
     size_t name_end;
+    char *public_id = NULL;
+    char *system_id = NULL;
+    int ok = 1;
     advance(tz, 2); /* "<!" */
     advance(tz, 7); /* "DOCTYPE" */
     skip_whitespace(tz);
@@ -496,6 +499,79 @@ static void parse_doctype(tokenizer *tz, token *out) {
         out->force_quirks = 1;
         report_error(tz, "doctype name missing");
     }
+    skip_whitespace(tz);
+    if (starts_with_ci(tz, "public")) {
+        advance(tz, 6);
+        skip_whitespace(tz);
+        char quote = peek(tz, 0);
+        if (quote != '"' && quote != '\'') {
+            out->force_quirks = 1;
+            report_error(tz, "doctype public id missing");
+            ok = 0;
+        } else {
+            advance(tz, 1);
+            size_t start = tz->pos;
+            while (tz->pos < tz->len && peek(tz, 0) != quote) {
+                advance(tz, 1);
+            }
+            public_id = substr_dup(tz->input, start, tz->pos);
+            if (peek(tz, 0) == quote) advance(tz, 1);
+            else {
+                out->force_quirks = 1;
+                report_error(tz, "doctype public id missing closing quote");
+                ok = 0;
+            }
+        }
+        skip_whitespace(tz);
+        if (peek(tz, 0) == '"' || peek(tz, 0) == '\'') {
+            char quote2 = peek(tz, 0);
+            advance(tz, 1);
+            size_t start2 = tz->pos;
+            while (tz->pos < tz->len && peek(tz, 0) != quote2) {
+                advance(tz, 1);
+            }
+            system_id = substr_dup(tz->input, start2, tz->pos);
+            if (peek(tz, 0) == quote2) advance(tz, 1);
+            else {
+                out->force_quirks = 1;
+                report_error(tz, "doctype system id missing closing quote");
+                ok = 0;
+            }
+        }
+    } else if (starts_with_ci(tz, "system")) {
+        advance(tz, 6);
+        skip_whitespace(tz);
+        char quote = peek(tz, 0);
+        if (quote != '"' && quote != '\'') {
+            out->force_quirks = 1;
+            report_error(tz, "doctype system id missing");
+            ok = 0;
+        } else {
+            advance(tz, 1);
+            size_t start = tz->pos;
+            while (tz->pos < tz->len && peek(tz, 0) != quote) {
+                advance(tz, 1);
+            }
+            system_id = substr_dup(tz->input, start, tz->pos);
+            if (peek(tz, 0) == quote) advance(tz, 1);
+            else {
+                out->force_quirks = 1;
+                report_error(tz, "doctype system id missing closing quote");
+                ok = 0;
+            }
+        }
+    }
+    if (!ok) {
+        out->force_quirks = 1;
+    }
+    if (public_id) {
+        for (size_t i = 0; public_id[i]; ++i) public_id[i] = to_lower_ascii(public_id[i]);
+    }
+    if (system_id) {
+        for (size_t i = 0; system_id[i]; ++i) system_id[i] = to_lower_ascii(system_id[i]);
+    }
+    out->public_id = public_id;
+    out->system_id = system_id;
     while (tz->pos < tz->len && peek(tz, 0) != '>') {
         advance(tz, 1);
     }
@@ -773,6 +849,32 @@ void tokenizer_init(tokenizer *tz, const char *input) {
     tz->col = 1;
     tz->state = TOKENIZE_DATA;
     tz->raw_tag[0] = '\0';
+}
+
+static void set_raw_state(tokenizer *tz, const char *tag, tokenizer_state state) {
+    if (!tz || !tag) return;
+    strncpy(tz->raw_tag, tag, sizeof(tz->raw_tag) - 1);
+    tz->raw_tag[sizeof(tz->raw_tag) - 1] = '\0';
+    tz->state = state;
+}
+
+void tokenizer_init_with_context(tokenizer *tz, const char *input, const char *context_tag) {
+    tokenizer_init(tz, input);
+    if (!tz || !context_tag) return;
+    char lowered[32];
+    size_t i = 0;
+    while (context_tag[i] && i < sizeof(lowered) - 1) {
+        lowered[i] = to_lower_ascii(context_tag[i]);
+        i++;
+    }
+    lowered[i] = '\0';
+    if (strcmp(lowered, "title") == 0 || strcmp(lowered, "textarea") == 0) {
+        set_raw_state(tz, lowered, TOKENIZE_RCDATA);
+    } else if (strcmp(lowered, "script") == 0) {
+        set_raw_state(tz, lowered, TOKENIZE_SCRIPT_DATA);
+    } else if (strcmp(lowered, "style") == 0) {
+        set_raw_state(tz, lowered, TOKENIZE_RAWTEXT);
+    }
 }
 
 void tokenizer_next(tokenizer *tz, token *out) {

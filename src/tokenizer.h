@@ -24,6 +24,7 @@ typedef struct {
 } tokenizer;
 
 void tokenizer_init(tokenizer *tz, const char *input);
+void tokenizer_init_with_context(tokenizer *tz, const char *input, const char *context_tag);
 void tokenizer_next(tokenizer *tz, token *out);
 
 #endif

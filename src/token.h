@@ -20,6 +20,8 @@ typedef struct {
 typedef struct {
     token_type type;
     char *name;   /* For tag name or doctype name */
+    char *public_id;
+    char *system_id;
     char *data;   /* For comment or character data */
     token_attr *attrs;
     size_t attr_count;

@@ -8,6 +8,9 @@ all: parse_html
 parse_html: $(SRC) src/parse_file_demo.c
 	$(CC) $(CFLAGS) -Isrc $(SRC) src/parse_file_demo.c -o $@
 
+parse_fragment_demo: $(SRC) src/parse_fragment_demo.c
+	$(CC) $(CFLAGS) -Isrc $(SRC) src/parse_fragment_demo.c -o $@
+
 test-html: parse_html
 	./parse_html tests/sample.html
 	./parse_html tests/autoclose.html
@@ -25,6 +28,16 @@ test-html: parse_html
 	./parse_html tests/foster_parenting.html
 	./parse_html tests/formatting_scope.html
 	./parse_html tests/formatting_misnest.html
+	./parse_html tests/quirks_p_table.html
+	./parse_html tests/no_quirks_p_table.html
+	./parse_html tests/doctype_modes_quirks.html
+	./parse_html tests/doctype_modes_standards.html
+	./parse_html tests/doctype_modes_limited.html
+
+test-fragment: parse_fragment_demo
+	bash tests/run_fragment_tests.sh ./parse_fragment_demo
+
+test-all: test-html test-fragment
 
 clean:
-	rm -f parse_html
+	rm -f parse_html parse_fragment_demo

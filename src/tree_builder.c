@@ -22,6 +22,12 @@ typedef enum {
     MODE_AFTER_AFTER_BODY
 } insertion_mode;
 
+typedef enum {
+    DOC_NO_QUIRKS = 0,
+    DOC_LIMITED_QUIRKS,
+    DOC_QUIRKS
+} doc_mode;
+
 static int is_table_mode(insertion_mode mode) {
     return mode == MODE_IN_TABLE ||
            mode == MODE_IN_TABLE_BODY ||
@@ -273,6 +279,63 @@ static int is_head_element(const char *name) {
            strcmp(name, "script") == 0;
 }
 
+static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mode dmode);
+
+static insertion_mode fragment_mode_for_context(const char *name) {
+    if (!name) return MODE_IN_BODY;
+    if (strcmp(name, "table") == 0) return MODE_IN_TABLE;
+    if (strcmp(name, "tbody") == 0 || strcmp(name, "thead") == 0 || strcmp(name, "tfoot") == 0) return MODE_IN_TABLE_BODY;
+    if (strcmp(name, "tr") == 0) return MODE_IN_ROW;
+    if (strcmp(name, "td") == 0 || strcmp(name, "th") == 0) return MODE_IN_CELL;
+    if (strcmp(name, "caption") == 0) return MODE_IN_CAPTION;
+    if (strcmp(name, "select") == 0) return MODE_IN_SELECT;
+    if (strcmp(name, "head") == 0) return MODE_IN_HEAD;
+    return MODE_IN_BODY;
+}
+
+static int is_body_ignored_start(const char *name);
+static int is_void_element(const char *name);
+
+static void handle_in_body_start_fragment(const char *name, int self_closing, node *doc, node_stack *st,
+                                          formatting_list *fmt, insertion_mode *mode) {
+    /* Table-related tags are parse errors in IN_BODY; ignore them. */
+    if (is_body_ignored_start(name)) {
+        return;
+    }
+    /* <table> closes an open <p>, then switches to IN_TABLE. */
+    if (name && strcmp(name, "table") == 0) {
+        body_autoclose_on_start(st, name, DOC_NO_QUIRKS);
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "table", NULL);
+        node_append_child(parent, n);
+        stack_push(st, n);
+        *mode = MODE_IN_TABLE;
+        return;
+    }
+    /* <select> in body switches to IN_SELECT. */
+    if (name && strcmp(name, "select") == 0) {
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "select", NULL);
+        node_append_child(parent, n);
+        stack_push(st, n);
+        *mode = MODE_IN_SELECT;
+        return;
+    }
+    fmt_tag ft = fmt_tag_from_name(name);
+    if (ft != FMT_NONE) {
+        node *parent = current_node(st, doc);
+        reconstruct_active_formatting(st, fmt, parent);
+    }
+    body_autoclose_on_start(st, name, DOC_NO_QUIRKS);
+    node *parent = current_node(st, doc);
+    node *n = node_create(NODE_ELEMENT, name ? name : "", NULL);
+    node_append_child(parent, n);
+    if (!self_closing && !is_void_element(name)) {
+        stack_push(st, n);
+        if (ft != FMT_NONE) formatting_push(fmt, ft, n);
+    }
+}
+
 static int is_table_element(const char *name) {
     if (!name) return 0;
     return strcmp(name, "table") == 0 ||
@@ -304,6 +367,39 @@ static int is_select_child_element(const char *name) {
     return strcmp(name, "option") == 0 || strcmp(name, "optgroup") == 0;
 }
 
+static int is_body_ignored_start(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "caption") == 0 ||
+           strcmp(name, "col") == 0 ||
+           strcmp(name, "colgroup") == 0 ||
+           strcmp(name, "frame") == 0 ||
+           strcmp(name, "head") == 0 ||
+           strcmp(name, "tbody") == 0 ||
+           strcmp(name, "td") == 0 ||
+           strcmp(name, "tfoot") == 0 ||
+           strcmp(name, "th") == 0 ||
+           strcmp(name, "thead") == 0 ||
+           strcmp(name, "tr") == 0;
+}
+
+static int is_void_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "area") == 0 ||
+           strcmp(name, "base") == 0 ||
+           strcmp(name, "br") == 0 ||
+           strcmp(name, "col") == 0 ||
+           strcmp(name, "embed") == 0 ||
+           strcmp(name, "hr") == 0 ||
+           strcmp(name, "img") == 0 ||
+           strcmp(name, "input") == 0 ||
+           strcmp(name, "link") == 0 ||
+           strcmp(name, "meta") == 0 ||
+           strcmp(name, "param") == 0 ||
+           strcmp(name, "source") == 0 ||
+           strcmp(name, "track") == 0 ||
+           strcmp(name, "wbr") == 0;
+}
+
 static int is_body_block_like_start(const char *name) {
     if (!name) return 0;
     /* Minimal set: enough to demonstrate auto-closing <p>/<li> cleanly. */
@@ -331,7 +427,156 @@ static int is_body_block_like_start(const char *name) {
            strcmp(name, "ul") == 0;
 }
 
-static void body_autoclose_on_start(node_stack *st, const char *tag_name) {
+static char to_lower_ascii_local(char c) {
+    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+static int is_ci_equal(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        if (to_lower_ascii_local(*a) != to_lower_ascii_local(*b)) return 0;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int starts_with_ci_str(const char *s, const char *prefix) {
+    if (!s || !prefix) return 0;
+    while (*prefix) {
+        if (*s == '\0') return 0;
+        if (to_lower_ascii_local(*s) != to_lower_ascii_local(*prefix)) return 0;
+        s++;
+        prefix++;
+    }
+    return 1;
+}
+
+static int is_quirks_public_prefix(const char *public_id) {
+    static const char *prefixes[] = {
+        "+//silmaril//dtd html pro v0r11 19970101//",
+        "-//advasoft ltd//dtd html 3.0 aswedit + extensions//",
+        "-//as//dtd html 3.0 aswedit + extensions//",
+        "-//ietf//dtd html 2.0 level 1//",
+        "-//ietf//dtd html 2.0 level 2//",
+        "-//ietf//dtd html 2.0 strict level 1//",
+        "-//ietf//dtd html 2.0 strict level 2//",
+        "-//ietf//dtd html 2.0 strict//",
+        "-//ietf//dtd html 2.0//",
+        "-//ietf//dtd html 2.1e//",
+        "-//ietf//dtd html 3.0//",
+        "-//ietf//dtd html 3.2 final//",
+        "-//ietf//dtd html 3.2//",
+        "-//ietf//dtd html 3//",
+        "-//ietf//dtd html level 0//",
+        "-//ietf//dtd html level 1//",
+        "-//ietf//dtd html level 2//",
+        "-//ietf//dtd html level 3//",
+        "-//ietf//dtd html strict level 0//",
+        "-//ietf//dtd html strict level 1//",
+        "-//ietf//dtd html strict level 2//",
+        "-//ietf//dtd html strict level 3//",
+        "-//ietf//dtd html strict//",
+        "-//ietf//dtd html//",
+        "-//metrius//dtd metrius presentational//",
+        "-//microsoft//dtd internet explorer 2.0 html strict//",
+        "-//microsoft//dtd internet explorer 2.0 html//",
+        "-//microsoft//dtd internet explorer 2.0 tables//",
+        "-//microsoft//dtd internet explorer 3.0 html strict//",
+        "-//microsoft//dtd internet explorer 3.0 html//",
+        "-//microsoft//dtd internet explorer 3.0 tables//",
+        "-//netscape comm. corp.//dtd html//",
+        "-//netscape comm. corp.//dtd strict html//",
+        "-//o'reilly and associates//dtd html 2.0//",
+        "-//o'reilly and associates//dtd html extended 1.0//",
+        "-//o'reilly and associates//dtd html extended relaxed 1.0//",
+        "-//sq//dtd html 2.0 hotmetal + extensions//",
+        "-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//",
+        "-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//",
+        "-//spyglass//dtd html 2.0 extended//",
+        "-//sun microsystems corp.//dtd hotjava html//",
+        "-//sun microsystems corp.//dtd hotjava strict html//",
+        "-//w3c//dtd html 3 1995-03-24//",
+        "-//w3c//dtd html 3.2 draft//",
+        "-//w3c//dtd html 3.2 final//",
+        "-//w3c//dtd html 3.2//",
+        "-//w3c//dtd html 3.2s draft//",
+        "-//w3c//dtd html 4.0 frameset//",
+        "-//w3c//dtd html 4.0 transitional//",
+        "-//w3c//dtd html experimental 19960712//",
+        "-//w3c//dtd html experimental 970421//",
+        "-//w3c//dtd w3 html//",
+        "-//w3o//dtd w3 html 3.0//",
+        "-//webtechs//dtd mozilla html 2.0//",
+        "-//webtechs//dtd mozilla html//"
+    };
+    if (!public_id) return 0;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (starts_with_ci_str(public_id, prefixes[i])) return 1;
+    }
+    return 0;
+}
+
+static int is_quirks_public_prefix_missing_system(const char *public_id) {
+    static const char *prefixes[] = {
+        "-//w3c//dtd html 4.01 frameset//",
+        "-//w3c//dtd html 4.01 transitional//"
+    };
+    if (!public_id) return 0;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (starts_with_ci_str(public_id, prefixes[i])) return 1;
+    }
+    return 0;
+}
+
+static int is_limited_quirks_public_prefix(const char *public_id) {
+    static const char *prefixes[] = {
+        "-//w3c//dtd xhtml 1.0 frameset//",
+        "-//w3c//dtd xhtml 1.0 transitional//"
+    };
+    if (!public_id) return 0;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (starts_with_ci_str(public_id, prefixes[i])) return 1;
+    }
+    return 0;
+}
+
+static int is_limited_quirks_public_prefix_system_not_missing(const char *public_id) {
+    static const char *prefixes[] = {
+        "-//w3c//dtd html 4.01 frameset//",
+        "-//w3c//dtd html 4.01 transitional//"
+    };
+    if (!public_id) return 0;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (starts_with_ci_str(public_id, prefixes[i])) return 1;
+    }
+    return 0;
+}
+
+static doc_mode determine_doc_mode(const token *t) {
+    if (!t || t->type != TOKEN_DOCTYPE) return DOC_NO_QUIRKS;
+    if (t->force_quirks) return DOC_QUIRKS;
+    if (!t->name || strcmp(t->name, "html") != 0) return DOC_QUIRKS;
+    const char *public_id = t->public_id;
+    const char *system_id = t->system_id;
+    int system_missing = (system_id == NULL);
+
+    if (public_id && is_ci_equal(public_id, "-//w3o//dtd w3 html strict 3.0//en//")) return DOC_QUIRKS;
+    if (public_id && is_ci_equal(public_id, "-/w3c/dtd html 4.0 transitional/en")) return DOC_QUIRKS;
+    if (public_id && is_ci_equal(public_id, "html")) return DOC_QUIRKS;
+    if (system_id && is_ci_equal(system_id, "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd")) return DOC_QUIRKS;
+    if (public_id && is_quirks_public_prefix(public_id)) return DOC_QUIRKS;
+    if (public_id && system_missing && is_quirks_public_prefix_missing_system(public_id)) return DOC_QUIRKS;
+
+    if (public_id && is_limited_quirks_public_prefix(public_id)) return DOC_LIMITED_QUIRKS;
+    if (public_id && system_id && is_limited_quirks_public_prefix_system_not_missing(public_id)) return DOC_LIMITED_QUIRKS;
+
+    return DOC_NO_QUIRKS;
+}
+
+static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mode dmode) {
+    (void)dmode;
     if (!tag_name) return;
 
     /* Auto-close <p> when a block-like element starts, or a new <p> starts. */
@@ -365,7 +610,7 @@ static void body_autoclose_on_start(node_stack *st, const char *tag_name) {
 }
 
 static void handle_in_body_start(const char *name, int self_closing, node *doc, node_stack *st, node **html, node **body,
-                                 formatting_list *fmt, insertion_mode *mode) {
+                                 formatting_list *fmt, insertion_mode *mode, doc_mode dmode) {
     if (!mode) return;
     fmt_tag ft = fmt_tag_from_name(name);
     if (ft != FMT_NONE) {
@@ -389,6 +634,9 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         return;
     }
     if (name && strcmp(name, "table") == 0) {
+        if (stack_has_open_named(st, "p")) {
+            stack_pop_until(st, "p");
+        }
         ensure_body(doc, st, html, body);
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "table", NULL);
@@ -397,7 +645,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         *mode = MODE_IN_TABLE;
         return;
     }
-    body_autoclose_on_start(st, name);
+    body_autoclose_on_start(st, name, dmode);
     ensure_body(doc, st, html, body);
     node *parent = current_node(st, doc);
     node *n = node_create(NODE_ELEMENT, name ? name : "", NULL);
@@ -460,6 +708,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
     insertion_mode mode = MODE_INITIAL;
+    doc_mode dmode = DOC_NO_QUIRKS;
     node *html = NULL;
     node *head = NULL;
     node *body = NULL;
@@ -483,10 +732,14 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                 case TOKEN_DOCTYPE:
                     n = node_create(NODE_DOCTYPE, t->name ? t->name : "", NULL);
                     node_append_child(doc, n);
+                    dmode = determine_doc_mode(t);
                     if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
                     break;
                 case TOKEN_START_TAG:
-                    if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
+                    if (mode == MODE_INITIAL) {
+                        dmode = DOC_QUIRKS;
+                        mode = MODE_BEFORE_HTML;
+                    }
                     if (mode == MODE_BEFORE_HTML) {
                         if (t->name && strcmp(t->name, "html") == 0) {
                             html = ensure_html(doc, &st, &html);
@@ -529,12 +782,12 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
+                            handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -723,7 +976,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             reprocess = 1;
                             break;
                         }
-                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode);
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t->name && (strcmp(t->name, "table") == 0 || strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
                             stack_pop_until(&st, "caption");
@@ -873,6 +1126,10 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             foster_insert(&st, doc, n);
                             break;
                         }
+                        if (mode == MODE_INITIAL) {
+                            dmode = DOC_QUIRKS;
+                            mode = MODE_BEFORE_HTML;
+                        }
                         if (mode == MODE_INITIAL || mode == MODE_BEFORE_HTML) {
                             ensure_body(doc, &st, &html, &body);
                             mode = MODE_IN_BODY;
@@ -902,6 +1159,7 @@ node *build_tree_from_input(const char *input) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
     insertion_mode mode = MODE_INITIAL;
+    doc_mode dmode = DOC_NO_QUIRKS;
     node *html = NULL;
     node *head = NULL;
     node *body = NULL;
@@ -927,10 +1185,14 @@ node *build_tree_from_input(const char *input) {
                 case TOKEN_DOCTYPE:
                     n = node_create(NODE_DOCTYPE, t.name ? t.name : "", NULL);
                     node_append_child(doc, n);
+                    dmode = determine_doc_mode(&t);
                     if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
                     break;
                 case TOKEN_START_TAG:
-                    if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
+                    if (mode == MODE_INITIAL) {
+                        dmode = DOC_QUIRKS;
+                        mode = MODE_BEFORE_HTML;
+                    }
                     if (mode == MODE_BEFORE_HTML) {
                         if (t.name && strcmp(t.name, "html") == 0) {
                             html = ensure_html(doc, &st, &html);
@@ -973,12 +1235,12 @@ node *build_tree_from_input(const char *input) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
+                            handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -1167,7 +1429,7 @@ node *build_tree_from_input(const char *input) {
                             reprocess = 1;
                             break;
                         }
-                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode);
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && (strcmp(t.name, "table") == 0 || strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
                             stack_pop_until(&st, "caption");
@@ -1316,6 +1578,10 @@ node *build_tree_from_input(const char *input) {
                             foster_insert(&st, doc, n);
                             break;
                         }
+                        if (mode == MODE_INITIAL) {
+                            dmode = DOC_QUIRKS;
+                            mode = MODE_BEFORE_HTML;
+                        }
                         if (mode == MODE_INITIAL || mode == MODE_BEFORE_HTML) {
                             ensure_body(doc, &st, &html, &body);
                             mode = MODE_IN_BODY;
@@ -1332,6 +1598,339 @@ node *build_tree_from_input(const char *input) {
                 case TOKEN_EOF:
                 default:
                     token_free(&t);
+                    return doc;
+            }
+        }
+
+        token_free(&t);
+    }
+}
+
+node *build_fragment_from_input(const char *input, const char *context_tag) {
+    tokenizer tz;
+    token t;
+    node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
+    node_stack st;
+    insertion_mode mode = MODE_IN_BODY;
+    formatting_list fmt = {0};
+    insertion_mode template_mode_stack[64];
+    int template_mode_top = 0;
+    node *context = NULL;
+
+    if (!doc) return NULL;
+    stack_init(&st);
+
+    if (context_tag && context_tag[0]) {
+        context = node_create(NODE_ELEMENT, context_tag, NULL);
+        stack_push(&st, context);
+        mode = fragment_mode_for_context(context_tag);
+    }
+
+    tokenizer_init_with_context(&tz, input, context_tag);
+
+    while (1) {
+        token_init(&t);
+        tokenizer_next(&tz, &t);
+
+        node *parent;
+        node *n = NULL;
+        int reprocess = 1;
+
+        while (reprocess) {
+            reprocess = 0;
+            parent = current_node(&st, doc);
+
+            switch (t.type) {
+                case TOKEN_START_TAG:
+                    if (mode == MODE_IN_HEAD) {
+                        if (t.name && !is_head_element(t.name)) {
+                            mode = MODE_IN_BODY;
+                            reprocess = 1;
+                            break;
+                        }
+                    }
+                    /* <template>: push content DocumentFragment wrapper */
+                    if (t.name && strcmp(t.name, "template") == 0) {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, "template", NULL);
+                        node_append_child(parent, n);
+                        stack_push(&st, n);
+                        node *content = node_create(NODE_ELEMENT, "content", NULL);
+                        node_append_child(n, content);
+                        stack_push(&st, content);
+                        if (template_mode_top < 64)
+                            template_mode_stack[template_mode_top++] = mode;
+                        mode = MODE_IN_BODY;
+                        break;
+                    }
+                    if (is_table_mode(mode)) {
+                        node *cur = current_node(&st, doc);
+                        if (cur && cur->name && !is_table_element(cur->name)) {
+                            handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                            break;
+                        }
+                    }
+                    if (mode == MODE_IN_BODY) {
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                        break;
+                    }
+                    if (mode == MODE_IN_TABLE) {
+                        if (t.name && strcmp(t.name, "caption") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "caption", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_CAPTION;
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "colgroup") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "colgroup", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "col") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "col", NULL);
+                            node_append_child(parent, n);
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
+                        if (t.name && is_table_section_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_TABLE_BODY;
+                            break;
+                        }
+                        if (t.name && (strcmp(t.name, "tr") == 0 || is_cell_element(t.name))) {
+                            /* Implicit <tbody> then reprocess in IN_TABLE_BODY */
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "tbody", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_TABLE_BODY;
+                            reprocess = 1;
+                            break;
+                        }
+                        if (!is_table_element(t.name)) {
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            foster_insert(&st, doc, n);
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                    } else if (mode == MODE_IN_TABLE_BODY) {
+                        if (t.name && strcmp(t.name, "tr") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_ROW;
+                            break;
+                        }
+                        if (t.name && is_cell_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            node *tr = node_create(NODE_ELEMENT, "tr", NULL);
+                            node_append_child(parent, tr);
+                            stack_push(&st, tr);
+                            node *cell = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(tr, cell);
+                            stack_push(&st, cell);
+                            mode = MODE_IN_CELL;
+                            break;
+                        }
+                        if (!is_table_element(t.name)) {
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            foster_insert(&st, doc, n);
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                    } else if (mode == MODE_IN_ROW) {
+                        if (t.name && is_cell_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_CELL;
+                            break;
+                        }
+                        if (!is_table_element(t.name)) {
+                            n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            foster_insert(&st, doc, n);
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                    } else if (mode == MODE_IN_CELL) {
+                        if (t.name && is_cell_element(t.name)) {
+                            close_cell(&st);
+                            mode = MODE_IN_ROW;
+                            reprocess = 1;
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "select", NULL);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_SELECT_IN_TABLE;
+                            break;
+                        }
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                    } else if (mode == MODE_IN_CAPTION) {
+                        if (t.name && strcmp(t.name, "table") == 0) {
+                            stack_pop_until(&st, "caption");
+                            mode = MODE_IN_TABLE;
+                            reprocess = 1;
+                            break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t.self_closing) {
+                            stack_push(&st, n);
+                        }
+                        break;
+                    } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
+                        if (t.name && strcmp(t.name, "select") == 0) {
+                            break;
+                        }
+                        /* Auto-close an open <option> before a new <option> */
+                        if (t.name && strcmp(t.name, "option") == 0 && stack_has_open_named(&st, "option")) {
+                            stack_pop_until(&st, "option");
+                        }
+                        if (t.name && is_select_child_element(t.name)) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, t.name, NULL);
+                            node_append_child(parent, n);
+                            if (!t.self_closing) {
+                                stack_push(&st, n);
+                            }
+                            break;
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        node_append_child(parent, n);
+                        if (!t.self_closing) {
+                            stack_push(&st, n);
+                        }
+                    }
+                    break;
+                case TOKEN_END_TAG:
+                    /* </template>: pop content + template, restore saved mode */
+                    if (t.name && strcmp(t.name, "template") == 0 && stack_has_open_named(&st, "template")) {
+                        stack_pop_until(&st, "template");
+                        if (template_mode_top > 0)
+                            mode = template_mode_stack[--template_mode_top];
+                        break;
+                    }
+                    /* End-tag mode transitions for table/cell/row/section/select/caption */
+                    if (t.name && strcmp(t.name, "table") == 0 && stack_has_open_named(&st, "table")) {
+                        stack_pop_until(&st, "table");
+                        mode = MODE_IN_BODY;
+                        break;
+                    }
+                    if (t.name && is_cell_element(t.name) && (mode == MODE_IN_CELL) && stack_has_open_named(&st, t.name)) {
+                        stack_pop_until(&st, t.name);
+                        mode = MODE_IN_ROW;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW && stack_has_open_named(&st, "tr")) {
+                        stack_pop_until(&st, "tr");
+                        mode = stack_has_open_named(&st, "tbody") || stack_has_open_named(&st, "thead") || stack_has_open_named(&st, "tfoot")
+                               ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_TABLE_BODY && stack_has_open_named(&st, t.name)) {
+                        stack_pop_until(&st, t.name);
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && stack_has_open_named(&st, "caption")) {
+                        stack_pop_until(&st, "caption");
+                        mode = MODE_IN_TABLE;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) && stack_has_open_named(&st, "select")) {
+                        stack_pop_until(&st, "select");
+                        mode = mode == MODE_IN_SELECT_IN_TABLE ? MODE_IN_TABLE : MODE_IN_BODY;
+                        break;
+                    }
+                    if (mode == MODE_IN_BODY) {
+                        fmt_tag ft = fmt_tag_from_name(t.name);
+                        if (ft != FMT_NONE) {
+                            if (!has_element_in_scope(&st, t.name)) {
+                                break;
+                            }
+                            formatting_remove_tag(&fmt, ft);
+                        }
+                    }
+                    if (t.name && !stack_has_open_named(&st, t.name)) {
+                        break;
+                    }
+                    stack_pop_until(&st, t.name);
+                    break;
+                case TOKEN_COMMENT:
+                    parent = current_node(&st, doc);
+                    n = node_create(NODE_COMMENT, NULL, t.data ? t.data : "");
+                    node_append_child(parent, n);
+                    break;
+                case TOKEN_CHARACTER:
+                    if (t.data && t.data[0] != '\0') {
+                        if (is_all_whitespace(t.data)) {
+                            break;
+                        }
+                        if (is_table_mode(mode)) {
+                            node *cur = current_node(&st, doc);
+                            if (mode == MODE_IN_CELL || (cur && cur->name && !is_table_element(cur->name))) {
+                                parent = cur;
+                                n = node_create(NODE_TEXT, NULL, t.data);
+                                node_append_child(parent, n);
+                                break;
+                            }
+                            n = node_create(NODE_TEXT, NULL, t.data);
+                            foster_insert(&st, doc, n);
+                            break;
+                        }
+                        if (mode == MODE_IN_BODY) {
+                            parent = current_node(&st, doc);
+                            reconstruct_active_formatting(&st, &fmt, parent);
+                        }
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_TEXT, NULL, t.data);
+                        node_append_child(parent, n);
+                    }
+                    break;
+                case TOKEN_EOF:
+                default:
+                    token_free(&t);
+                    if (context) {
+                        node *child = context->first_child;
+                        doc->first_child = child;
+                        doc->last_child = context->last_child;
+                        while (child) {
+                            child->parent = doc;
+                            if (!child->next_sibling) {
+                                doc->last_child = child;
+                            }
+                            child = child->next_sibling;
+                        }
+                        node_free_shallow(context);
+                    }
                     return doc;
             }
         }

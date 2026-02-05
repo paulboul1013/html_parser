@@ -60,6 +60,13 @@ void node_insert_before(node *parent, node *child, node *ref) {
     prev->next_sibling = child;
 }
 
+void node_free_shallow(node *n) {
+    if (!n) return;
+    free(n->name);
+    free(n->data);
+    free(n);
+}
+
 void node_free(node *n) {
     node *child;
     node *next;

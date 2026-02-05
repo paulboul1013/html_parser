@@ -30,11 +30,11 @@
 ## P2（中期補完）
 
 - **Quirks / Limited-quirks 模式**
-  - 完整 doctype 判定規則
-  - 影響 tree construction 的模式切換
+  - 完整 doctype 判定規則 ✅
+  - 影響 tree construction 的模式切換 ✅
 - **Fragment parsing**
-  - context element 的 tokenizer 初始化
-  - fragment tree 的特殊插入規則
+  - context element 的 tokenizer 初始化 ✅
+  - fragment tree 的特殊插入規則 ✅
 
 ## P3（進階/完整相容）
 
