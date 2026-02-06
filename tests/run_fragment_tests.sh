@@ -228,7 +228,7 @@ run "11  void element <meta> not pushed to stack" \
     div tests/frag_11_head_in_body.html pass <<'EOF'
 ASCII Tree (Fragment)
 DOCUMENT
-|-- ELEMENT name="meta"
+|-- ELEMENT name="meta" [charset="utf-8"]
 \-- ELEMENT name="title"
     \-- TEXT data="X"
 EOF

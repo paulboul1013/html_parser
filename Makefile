@@ -11,6 +11,9 @@ parse_html: $(SRC) src/parse_file_demo.c
 parse_fragment_demo: $(SRC) src/parse_fragment_demo.c
 	$(CC) $(CFLAGS) -Isrc $(SRC) src/parse_fragment_demo.c -o $@
 
+serialize_demo: $(SRC) src/serialize_demo.c
+	$(CC) $(CFLAGS) -Isrc $(SRC) src/serialize_demo.c -o $@
+
 test-html: parse_html
 	./parse_html tests/sample.html
 	./parse_html tests/autoclose.html
@@ -33,11 +36,24 @@ test-html: parse_html
 	./parse_html tests/doctype_modes_quirks.html
 	./parse_html tests/doctype_modes_standards.html
 	./parse_html tests/doctype_modes_limited.html
+	./parse_html tests/attrs_basic.html
+	./parse_html tests/attrs_void.html
+	./parse_html tests/attrs_edge.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo
 
+test-serialize: serialize_demo
+	@echo "=== Serialization: attrs_basic.html ==="
+	@./serialize_demo tests/attrs_basic.html
+	@echo ""
+	@echo "=== Serialization: attrs_void.html ==="
+	@./serialize_demo tests/attrs_void.html
+	@echo ""
+	@echo "=== Serialization: rcdata_rawtext_script.html ==="
+	@./serialize_demo tests/rcdata_rawtext_script.html
+
 test-all: test-html test-fragment
 
 clean:
-	rm -f parse_html parse_fragment_demo
+	rm -f parse_html parse_fragment_demo serialize_demo

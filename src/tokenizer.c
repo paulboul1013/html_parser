@@ -445,6 +445,12 @@ static void enter_raw_state(tokenizer *tz, const char *tag, tokenizer_state stat
 }
 
 static void append_attr(token *out, const char *name, const char *value) {
+    /* WHATWG: duplicate attribute name is a parse error; drop the new one */
+    for (size_t i = 0; i < out->attr_count; ++i) {
+        if (out->attrs[i].name && strcmp(out->attrs[i].name, name) == 0) {
+            return;
+        }
+    }
     token_attr *next = (token_attr *)realloc(out->attrs, sizeof(token_attr) * (out->attr_count + 1));
     if (!next) return;
     out->attrs = next;

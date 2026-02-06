@@ -1,8 +1,21 @@
+#define _POSIX_C_SOURCE 200809L
 #include "tree_builder.h"
 #include "tokenizer.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+static void attach_attrs(node *n, const token_attr *src, size_t count) {
+    if (!src || count == 0) return;
+    n->attrs = (node_attr *)malloc(count * sizeof(node_attr));
+    if (!n->attrs) return;
+    n->attr_count = count;
+    for (size_t i = 0; i < count; ++i) {
+        n->attrs[i].name  = src[i].name  ? strdup(src[i].name)  : NULL;
+        n->attrs[i].value = src[i].value ? strdup(src[i].value) : NULL;
+    }
+}
+
 
 #define STACK_MAX 256
 
@@ -327,7 +340,8 @@ static int is_body_ignored_start(const char *name);
 static int is_void_element(const char *name);
 
 static void handle_in_body_start_fragment(const char *name, int self_closing, node *doc, node_stack *st,
-                                          formatting_list *fmt, insertion_mode *mode) {
+                                          formatting_list *fmt, insertion_mode *mode,
+                                          const token_attr *attrs, size_t attr_count) {
     /* Table-related tags are parse errors in IN_BODY; ignore them. */
     if (is_body_ignored_start(name)) {
         return;
@@ -337,6 +351,7 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
         body_autoclose_on_start(st, name, DOC_NO_QUIRKS);
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "table", NULL);
+        attach_attrs(n, attrs, attr_count);
         node_append_child(parent, n);
         stack_push(st, n);
         *mode = MODE_IN_TABLE;
@@ -346,6 +361,7 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
     if (name && strcmp(name, "select") == 0) {
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "select", NULL);
+        attach_attrs(n, attrs, attr_count);
         node_append_child(parent, n);
         stack_push(st, n);
         *mode = MODE_IN_SELECT;
@@ -359,6 +375,7 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
     body_autoclose_on_start(st, name, DOC_NO_QUIRKS);
     node *parent = current_node(st, doc);
     node *n = node_create(NODE_ELEMENT, name ? name : "", NULL);
+    attach_attrs(n, attrs, attr_count);
     node_append_child(parent, n);
     if (!self_closing && !is_void_element(name)) {
         stack_push(st, n);
@@ -640,7 +657,8 @@ static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mo
 }
 
 static void handle_in_body_start(const char *name, int self_closing, node *doc, node_stack *st, node **html, node **body,
-                                 formatting_list *fmt, insertion_mode *mode, doc_mode dmode) {
+                                 formatting_list *fmt, insertion_mode *mode, doc_mode dmode,
+                                 const token_attr *attrs, size_t attr_count) {
     if (!mode) return;
     fmt_tag ft = fmt_tag_from_name(name);
     if (ft != FMT_NONE) {
@@ -658,6 +676,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         ensure_body(doc, st, html, body);
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "select", NULL);
+        attach_attrs(n, attrs, attr_count);
         node_append_child(parent, n);
         stack_push(st, n);
         *mode = MODE_IN_SELECT;
@@ -670,6 +689,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         ensure_body(doc, st, html, body);
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "table", NULL);
+        attach_attrs(n, attrs, attr_count);
         node_append_child(parent, n);
         stack_push(st, n);
         *mode = MODE_IN_TABLE;
@@ -679,8 +699,9 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     ensure_body(doc, st, html, body);
     node *parent = current_node(st, doc);
     node *n = node_create(NODE_ELEMENT, name ? name : "", NULL);
+    attach_attrs(n, attrs, attr_count);
     node_append_child(parent, n);
-    if (!self_closing) {
+    if (!self_closing && !is_void_element(name)) {
         stack_push(st, n);
         if (ft != FMT_NONE) formatting_push(fmt, ft, n);
     }
@@ -780,6 +801,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         html = ensure_html(doc, &st, &html);
                         if (t->name && strcmp(t->name, "head") == 0) {
                             head = node_create(NODE_ELEMENT, "head", NULL);
+                            attach_attrs(head, t->attrs, t->attr_count);
                             node_append_child(html, head);
                             stack_push(&st, head);
                             mode = MODE_IN_HEAD;
@@ -794,6 +816,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "head") == 0) {
                             if (!head) {
                                 head = node_create(NODE_ELEMENT, "head", NULL);
+                                attach_attrs(head, t->attrs, t->attr_count);
                                 node_append_child(ensure_html(doc, &st, &html), head);
                                 stack_push(&st, head);
                             }
@@ -813,18 +836,19 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                            handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t->attrs, t->attr_count);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t->attrs, t->attr_count);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
                         if (t->name && strcmp(t->name, "caption") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "caption", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -834,6 +858,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "colgroup") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "colgroup", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             break;
@@ -841,12 +866,14 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "col") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "col", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             break;
                         }
                         if (t->name && strcmp(t->name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
@@ -855,6 +882,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && is_table_section_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_TABLE_BODY;
@@ -863,6 +891,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "tr") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "tr", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_ROW;
@@ -871,6 +900,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && is_cell_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -885,12 +915,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t->self_closing) {
+                            if (!t->self_closing && !is_void_element(t->name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -899,8 +930,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     } else if (mode == MODE_IN_HEAD) {
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                        attach_attrs(n, t->attrs, t->attr_count);
                         node_append_child(parent, n);
-                        if (!t->self_closing) {
+                        if (!t->self_closing && !is_void_element(t->name)) {
                             stack_push(&st, n);
                         }
                     } else if (mode == MODE_IN_TABLE_BODY) {
@@ -917,6 +949,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "tr") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "tr", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_ROW;
@@ -928,6 +961,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             node_append_child(parent, tr);
                             stack_push(&st, tr);
                             node *cell = node_create(NODE_ELEMENT, t->name, NULL);
+                            attach_attrs(cell, t->attrs, t->attr_count);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
                             formatting_push_marker(&fmt);
@@ -942,12 +976,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t->self_closing) {
+                            if (!t->self_closing && !is_void_element(t->name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -957,6 +992,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && is_cell_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -979,12 +1015,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t->self_closing) {
+                            if (!t->self_closing && !is_void_element(t->name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -994,6 +1031,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && strcmp(t->name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
@@ -1011,7 +1049,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             reprocess = 1;
                             break;
                         }
-                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                        handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t->attrs, t->attr_count);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t->name && (strcmp(t->name, "table") == 0 || strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
                             stack_pop_until(&st, "caption");
@@ -1021,8 +1059,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                        attach_attrs(n, t->attrs, t->attr_count);
                         node_append_child(parent, n);
-                        if (!t->self_closing) {
+                        if (!t->self_closing && !is_void_element(t->name)) {
                             stack_push(&st, n);
                         }
                         break;
@@ -1034,8 +1073,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (t->name && is_select_child_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
                             node_append_child(parent, n);
-                            if (!t->self_closing) {
+                            if (!t->self_closing && !is_void_element(t->name)) {
                                 stack_push(&st, n);
                             }
                             break;
@@ -1048,8 +1088,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t->name ? t->name : "", NULL);
+                        attach_attrs(n, t->attrs, t->attr_count);
                         node_append_child(parent, n);
-                        if (!t->self_closing) {
+                        if (!t->self_closing && !is_void_element(t->name)) {
                             stack_push(&st, n);
                         }
                     }
@@ -1242,6 +1283,7 @@ node *build_tree_from_input(const char *input) {
                         html = ensure_html(doc, &st, &html);
                         if (t.name && strcmp(t.name, "head") == 0) {
                             head = node_create(NODE_ELEMENT, "head", NULL);
+                            attach_attrs(head, t.attrs, t.attr_count);
                             node_append_child(html, head);
                             stack_push(&st, head);
                             mode = MODE_IN_HEAD;
@@ -1256,6 +1298,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "head") == 0) {
                             if (!head) {
                                 head = node_create(NODE_ELEMENT, "head", NULL);
+                                attach_attrs(head, t.attrs, t.attr_count);
                                 node_append_child(ensure_html(doc, &st, &html), head);
                                 stack_push(&st, head);
                             }
@@ -1275,18 +1318,19 @@ node *build_tree_from_input(const char *input) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                            handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t.attrs, t.attr_count);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t.attrs, t.attr_count);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
                         if (t.name && strcmp(t.name, "caption") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "caption", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -1296,6 +1340,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "colgroup") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "colgroup", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             break;
@@ -1303,12 +1348,14 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "col") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "col", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             break;
                         }
                         if (t.name && strcmp(t.name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
@@ -1317,6 +1364,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && is_table_section_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_TABLE_BODY;
@@ -1325,6 +1373,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "tr") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "tr", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_ROW;
@@ -1333,6 +1382,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && is_cell_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -1347,12 +1397,13 @@ node *build_tree_from_input(const char *input) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -1361,8 +1412,9 @@ node *build_tree_from_input(const char *input) {
                     } else if (mode == MODE_IN_HEAD) {
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
-                        if (!t.self_closing) {
+                        if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
                         }
                     } else if (mode == MODE_IN_TABLE_BODY) {
@@ -1379,6 +1431,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "tr") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "tr", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_ROW;
@@ -1390,6 +1443,7 @@ node *build_tree_from_input(const char *input) {
                             node_append_child(parent, tr);
                             stack_push(&st, tr);
                             node *cell = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(cell, t.attrs, t.attr_count);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
                             formatting_push_marker(&fmt);
@@ -1404,12 +1458,13 @@ node *build_tree_from_input(const char *input) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -1419,6 +1474,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && is_cell_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -1441,12 +1497,13 @@ node *build_tree_from_input(const char *input) {
                                 reconstruct_active_formatting(&st, &fmt, fp);
                             }
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             if (table && fp == table->parent) {
                                 node_insert_before(fp, n, table);
                             } else {
                                 node_append_child(fp, n);
                             }
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
@@ -1456,6 +1513,7 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
@@ -1473,7 +1531,7 @@ node *build_tree_from_input(const char *input) {
                             reprocess = 1;
                             break;
                         }
-                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode);
+                        handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode, dmode, t.attrs, t.attr_count);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && (strcmp(t.name, "table") == 0 || strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
                             stack_pop_until(&st, "caption");
@@ -1483,8 +1541,9 @@ node *build_tree_from_input(const char *input) {
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
-                        if (!t.self_closing) {
+                        if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
                         }
                         break;
@@ -1495,8 +1554,9 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && is_select_child_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
                             break;
@@ -1509,8 +1569,9 @@ node *build_tree_from_input(const char *input) {
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
-                        if (!t.self_closing) {
+                        if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
                         }
                     }
@@ -1702,6 +1763,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     if (t.name && strcmp(t.name, "template") == 0) {
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, "template", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
                         stack_push(&st, n);
                         node *content = node_create(NODE_ELEMENT, "content", NULL);
@@ -1715,18 +1777,19 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                            handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
                         if (t.name && strcmp(t.name, "caption") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "caption", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -1736,6 +1799,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && strcmp(t.name, "colgroup") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "colgroup", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             break;
@@ -1743,12 +1807,14 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && strcmp(t.name, "col") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "col", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             break;
                         }
                         if (t.name && strcmp(t.name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
@@ -1757,6 +1823,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && is_table_section_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_TABLE_BODY;
@@ -1774,8 +1841,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                         if (!is_table_element(t.name)) {
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             foster_insert(&st, doc, n);
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
                             break;
@@ -1784,6 +1852,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && strcmp(t.name, "tr") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "tr", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_ROW;
@@ -1795,6 +1864,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             node_append_child(parent, tr);
                             stack_push(&st, tr);
                             node *cell = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(cell, t.attrs, t.attr_count);
                             node_append_child(tr, cell);
                             stack_push(&st, cell);
                             formatting_push_marker(&fmt);
@@ -1803,8 +1873,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                         if (!is_table_element(t.name)) {
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             foster_insert(&st, doc, n);
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
                             break;
@@ -1813,6 +1884,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && is_cell_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             formatting_push_marker(&fmt);
@@ -1821,8 +1893,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                         if (!is_table_element(t.name)) {
                             n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             foster_insert(&st, doc, n);
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
                             break;
@@ -1837,12 +1910,13 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "select", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
                             stack_push(&st, n);
                             mode = MODE_IN_SELECT_IN_TABLE;
                             break;
                         }
-                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode);
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && strcmp(t.name, "table") == 0) {
                             stack_pop_until(&st, "caption");
@@ -1852,8 +1926,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
-                        if (!t.self_closing) {
+                        if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
                         }
                         break;
@@ -1868,16 +1943,18 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && is_select_child_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
                             node_append_child(parent, n);
-                            if (!t.self_closing) {
+                            if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
                             break;
                         }
                         parent = current_node(&st, doc);
                         n = node_create(NODE_ELEMENT, t.name ? t.name : "", NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
                         node_append_child(parent, n);
-                        if (!t.self_closing) {
+                        if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
                         }
                     }

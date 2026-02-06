@@ -11,10 +11,17 @@ typedef enum {
     NODE_COMMENT
 } node_type;
 
+typedef struct {
+    char *name;
+    char *value;
+} node_attr;
+
 typedef struct node {
     node_type type;
     char *name;              /* element/doctype name */
     char *data;              /* text/comment data */
+    node_attr *attrs;        /* element attributes (NULL if none) */
+    size_t attr_count;
     struct node *parent;
     struct node *first_child;
     struct node *last_child;
@@ -28,5 +35,8 @@ void node_free_shallow(node *n);
 void node_free(node *n);
 
 void tree_dump_ascii(const node *root, const char *title);
+
+/* Serialize tree to HTML string (caller must free) */
+char *tree_serialize_html(const node *root);
 
 #endif

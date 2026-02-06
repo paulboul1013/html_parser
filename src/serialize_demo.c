@@ -28,7 +28,7 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    const char *path = (argc > 1) ? argv[1] : "tests/sample.html";
+    const char *path = (argc > 1) ? argv[1] : "tests/attrs_basic.html";
     char *input = read_file(path);
     if (!input) {
         fprintf(stderr, "failed to read %s\n", path);
@@ -40,10 +40,16 @@ int main(int argc, char **argv) {
         free(input);
         return 1;
     }
-    char title[512];
-    snprintf(title, sizeof(title), "--- %s ---", path);
-    tree_dump_ascii(doc, title);
-    printf("\n");
+
+    /* Serialize back to HTML */
+    char *html = tree_serialize_html(doc);
+    if (html) {
+        printf("%s", html);
+        free(html);
+    } else {
+        fprintf(stderr, "serialization failed\n");
+    }
+
     node_free(doc);
     free(input);
     return 0;
