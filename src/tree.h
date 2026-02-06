@@ -31,6 +31,8 @@ typedef struct node {
 node *node_create(node_type type, const char *name, const char *data);
 void node_append_child(node *parent, node *child);
 void node_insert_before(node *parent, node *child, node *ref);
+void node_remove_child(node *parent, node *child);
+void node_reparent_children(node *src, node *dst);
 void node_free_shallow(node *n);
 void node_free(node *n);
 

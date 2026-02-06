@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>AAA Extreme Test Cases</title>
+</head>
+
+<body>
+    <h1>Test 1: Deep Nesting Adoption Agency (多次嵌套)</h1>
+    <div class="test1">
+        <b><i><u>X</b></u></i>
+    </div>
+
+    <h1>Test 2: Table Foster Parenting</h1>
+    <table border="1" class="test2">
+        <tr>
+            <td>Cell 1
+                <p>Paragraph inside table cell</p>
+            </td>
+            <td>Cell 2
+                <b>Bold in cell</b>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2">
+                <div>Div inside td</div>
+                <span>Span inside td</span>
+            </td>
+        </tr>
+    </table>
+
+    <!-- 经典Foster Parenting场景：直接在table内放置非表格元素 -->
+    <table border="1" class="test2-foster">
+        <b>Bold directly in table (should be fostered out)</b>
+        <tr>
+            <td>
+                <i>Italic in cell</i>
+                <p>Para in cell</p>
+            </td>
+        </tr>
+        <em>Emphasis after row (should be fostered)</em>
+    </table>
+
+    <h1>Test 3: 8-Loop Limit Extreme Case</h1>
+    <div class="test3">
+        <!-- 故意创建超过8层的formatting elements嵌套 -->
+        <a><b><i><u><code><em><strong><small><big>
+        Z
+        </a></b></u></code></em></strong></big></small>
+    </div>
+
+    <!-- 更极端的8+层交叉嵌套 -->
+    <div class="test3-extreme">
+        <b><i><u><s><tt><kbd><mark><span>
+                                        Deep Content
+        </b></i></u></s></tt></kbd></mark></span>
+    </div>
+
+    <h1>Test 4: Combined Chaos (组合混乱)</h1>
+    <table class="test4">
+        <tr>
+            <td>
+                <b><i>BI start
+            </td>
+            <td>
+                </b>Only I end</i>
+            </td>
+        </tr>
+    </table>
+
+    <h1>Test 5: Script in Table (额外测试)</h1>
+    <table class="test5">
+        <script>
+            // This script should be fostered outside table in some modes
+            document.write("<tr><td>Script-generated</td></tr>");
+        </script>
+        <tr>
+            <td>Normal cell</td>
+        </tr>
+    </table>
+</body>
+
+</html>

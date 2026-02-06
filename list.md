@@ -73,11 +73,11 @@
 
 ### Medium
 
-- **Adoption Agency Algorithm（AAA）補完** ⬜
-  - 目前實現僅覆蓋「無 furthest block」路徑（pop formatting + 清除 active list）。
-  - 遺漏的路徑：有 furthest block 時的重新巢套（loop steps 13–19），即把 formatting element 插入 furthest block 內部並移動子節點。
-  - 觸發條件範例：`<b><p>X</b>Y</p>` — 此時 `<p>` 就是 furthest block。
-  - 目前 `<b><i>X</b>Y</i>` 等無 furthest block 的情況均已正確。
+- **Adoption Agency Algorithm（AAA）補完** ✅
+  - 完整實現 WHATWG §13.2.6.4，包含 furthest block 路徑（outer loop + inner loop + replacement element 建立）。
+  - 新增 `is_special_element()` 完整列表、`clone_element_shallow()`、stack/formatting list 索引操作。
+  - `tree.c` 新增 `node_remove_child()` 和 `node_reparent_children()` 用於 AAA 子節點搬移。
+  - 三處 builder 函數的 end tag 格式化處理統一由 `adoption_agency()` 處理。
 
 - **Scoping elements 列表補完** ⬜
   - 目前 `is_scoping_element()` 僅列出 5 個：`html`, `table`, `td`, `th`, `caption`。

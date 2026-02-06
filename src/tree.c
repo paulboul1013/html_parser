@@ -69,6 +69,45 @@ void node_insert_before(node *parent, node *child, node *ref) {
     prev->next_sibling = child;
 }
 
+void node_remove_child(node *parent, node *child) {
+    if (!parent || !child) return;
+    if (parent->first_child == child) {
+        parent->first_child = child->next_sibling;
+        if (parent->last_child == child) {
+            parent->last_child = NULL;
+        }
+    } else {
+        node *prev = parent->first_child;
+        while (prev && prev->next_sibling != child) {
+            prev = prev->next_sibling;
+        }
+        if (!prev) return;
+        prev->next_sibling = child->next_sibling;
+        if (parent->last_child == child) {
+            parent->last_child = prev;
+        }
+    }
+    child->parent = NULL;
+    child->next_sibling = NULL;
+}
+
+void node_reparent_children(node *src, node *dst) {
+    if (!src || !dst || !src->first_child) return;
+    node *child = src->first_child;
+    while (child) {
+        child->parent = dst;
+        child = child->next_sibling;
+    }
+    if (dst->last_child) {
+        dst->last_child->next_sibling = src->first_child;
+    } else {
+        dst->first_child = src->first_child;
+    }
+    dst->last_child = src->last_child;
+    src->first_child = NULL;
+    src->last_child = NULL;
+}
+
 void node_free_shallow(node *n) {
     if (!n) return;
     free(n->name);

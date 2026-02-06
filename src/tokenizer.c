@@ -167,6 +167,17 @@ static named_entity *g_entities = NULL;
 static size_t g_entities_count = 0;
 static int g_entities_loaded = 0;
 
+static void entities_cleanup(void) {
+    for (size_t i = 0; i < g_entities_count; ++i) {
+        free(g_entities[i].name);
+        free(g_entities[i].value);
+    }
+    free(g_entities);
+    g_entities = NULL;
+    g_entities_count = 0;
+    g_entities_loaded = 0;
+}
+
 static void entities_add(const char *name, const char *value) {
     named_entity *next = (named_entity *)realloc(g_entities, sizeof(named_entity) * (g_entities_count + 1));
     if (!next) return;
@@ -197,6 +208,7 @@ static void entities_load_from_file(const char *path) {
 static void entities_load_once(void) {
     if (g_entities_loaded) return;
     g_entities_loaded = 1;
+    atexit(entities_cleanup);
 
     /* Try to load full list from entities.tsv if present */
     entities_load_from_file("entities.tsv");
@@ -265,8 +277,9 @@ static char *decode_character_references(const char *s) {
         if (s[i] != '&') {
             if (len + 2 > cap) {
                 cap *= 2;
-                out = (char *)realloc(out, cap);
-                if (!out) return NULL;
+                char *tmp = (char *)realloc(out, cap);
+                if (!tmp) { free(out); return NULL; }
+                out = tmp;
             }
             out[len++] = s[i++];
             continue;
@@ -295,8 +308,9 @@ static char *decode_character_references(const char *s) {
                 size_t n = encode_utf8(codepoint, buf);
                 if (len + n + 1 > cap) {
                     cap = (cap + n + 1) * 2;
-                    out = (char *)realloc(out, cap);
-                    if (!out) return NULL;
+                    char *tmp = (char *)realloc(out, cap);
+                    if (!tmp) { free(out); return NULL; }
+                    out = tmp;
                 }
                 for (size_t k = 0; k < n; ++k) out[len++] = buf[k];
                 i = j + 1;
@@ -307,8 +321,9 @@ static char *decode_character_references(const char *s) {
                 size_t n = encode_utf8(codepoint, buf);
                 if (len + n + 1 > cap) {
                     cap = (cap + n + 1) * 2;
-                    out = (char *)realloc(out, cap);
-                    if (!out) return NULL;
+                    char *tmp = (char *)realloc(out, cap);
+                    if (!tmp) { free(out); return NULL; }
+                    out = tmp;
                 }
                 for (size_t k = 0; k < n; ++k) out[len++] = buf[k];
                 i = j;
@@ -321,8 +336,9 @@ static char *decode_character_references(const char *s) {
                 size_t vlen = strlen(value);
                 if (len + vlen + 1 > cap) {
                     cap = (cap + vlen + 1) * 2;
-                    out = (char *)realloc(out, cap);
-                    if (!out) return NULL;
+                    char *tmp = (char *)realloc(out, cap);
+                    if (!tmp) { free(out); return NULL; }
+                    out = tmp;
                 }
                 memcpy(out + len, value, vlen);
                 len += vlen;
@@ -333,8 +349,9 @@ static char *decode_character_references(const char *s) {
 
         if (len + 2 > cap) {
             cap *= 2;
-            out = (char *)realloc(out, cap);
-            if (!out) return NULL;
+            char *tmp = (char *)realloc(out, cap);
+            if (!tmp) { free(out); return NULL; }
+            out = tmp;
         }
         out[len++] = s[i++];
     }
