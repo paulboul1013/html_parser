@@ -79,15 +79,16 @@
   - `tree.c` 新增 `node_remove_child()` 和 `node_reparent_children()` 用於 AAA 子節點搬移。
   - 三處 builder 函數的 end tag 格式化處理統一由 `adoption_agency()` 處理。
 
-- **Scoping elements 列表補完** ⬜
-  - 目前 `is_scoping_element()` 僅列出 5 個：`html`, `table`, `td`, `th`, `caption`。
-  - WHATWG 規範中 "scope" 包含更多：`button`, `select`, `li`（list-item scope）、`fieldset`, `details`, `summary`, `object`, `applet`, `marquee`, `template`, `dd`, `dt`。
-  - 這些遺漏會導致 `has_element_in_scope()` 在某些巢套結構中傳回錯誤結果。
+- **Scoping elements 列表補完** ✅
+  - `is_scoping_element()` 現在僅保留 WHATWG general scope 障壁（applet, caption, html, table, td, th, marquee, object, template）。
+  - 新增 4 種 scope 類型：general scope、list item scope（+ol, ul）、button scope（+button）、table scope（html, table, template）。
+  - 新增 `has_element_in_list_item_scope()`、`has_element_in_button_scope()`、`has_element_in_table_scope()`。
+  - `<p>` 自動關閉使用 button scope；`<li>` 自動關閉使用 list item scope；table end tag 使用 table scope。
 
-- **Formatting elements 列表擴充** ⬜
-  - 目前僅追蹤 4 個：`b`, `i`, `em`, `strong`。
-  - WHATWG §13.2.6.1 定義的 formatting elements 還包括：`a`, `b`, `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`, `strong`, `tt`, `u`。
-  - 遺漏的元素不會進入 active formatting list，AAA 也不會對它們觸發，巢套容錯將不正確。
+- **Formatting elements 列表擴充** ✅
+  - 已支援完整 WHATWG §13.2.6.1 定義的全部 14 個 formatting elements：`a`, `b`, `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`, `strong`, `tt`, `u`。
+  - `fmt_tag` enum、`fmt_tag_from_name()`、`fmt_tag_name()` 已涵蓋所有元素。
+  - 所有 formatting elements 均進入 active formatting list，AAA 對它們均正確觸發。
 
 - **Formal "generate implied end tags" 算法** ⬜
   - WHATWG §13.2.6.3 定義了 "generate implied end tags" 和 "generate implied end tags, except for X" 兩種變體。

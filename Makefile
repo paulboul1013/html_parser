@@ -41,6 +41,7 @@ test-html: parse_html
 	./parse_html tests/attrs_edge.html
 	./parse_html tests/aaa_basic.html
 	./parse_html tests/big_test.html
+	./parse_html tests/scoping.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

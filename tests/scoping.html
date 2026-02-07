@@ -1,0 +1,47 @@
+<!-- Scoping elements test: verify scope barriers work correctly -->
+
+<!-- Test 1: <p> inside <button> should NOT be auto-closed by outer block element -->
+<!-- Button is a button-scope barrier, so <p> inside button is shielded -->
+<div>
+  <p>outer para
+  <button>
+    <p>inner para in button
+  </button>
+  <div>block after button</div>
+</div>
+
+<!-- Test 2: <li> inside <ol>/<ul> should NOT be auto-closed by outer <li> -->
+<!-- ol/ul are list-item-scope barriers -->
+<ul>
+  <li>outer item
+    <ol>
+      <li>inner item (should not close outer li)
+    </ol>
+  <li>second outer item
+</ul>
+
+<!-- Test 3: table scope isolation -->
+<!-- Only html, table, template are table-scope barriers -->
+<table>
+  <tr><td>cell 1</td><td>cell 2</td></tr>
+  <tr><td>cell 3</td><td>cell 4</td></tr>
+</table>
+
+<!-- Test 4: <dt>/<dd> auto-close uses general scope -->
+<dl>
+  <dt>term 1
+  <dd>definition 1
+  <dt>term 2
+  <dd>definition 2
+</dl>
+
+<!-- Test 5: nested tables with scope isolation -->
+<table>
+  <tr>
+    <td>
+      <table>
+        <tr><td>nested cell</td></tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -188,25 +188,41 @@ static int stack_has_open_table_section(node_stack *st) {
     return stack_has_open_named(st, "thead") || stack_has_open_named(st, "tbody") || stack_has_open_named(st, "tfoot");
 }
 
+/* General scope barriers (WHATWG §13.2.4.2) */
 static int is_scoping_element(const char *name) {
     if (!name) return 0;
-    return strcmp(name, "html") == 0 ||
+    return strcmp(name, "applet") == 0 ||
+           strcmp(name, "caption") == 0 ||
+           strcmp(name, "html") == 0 ||
            strcmp(name, "table") == 0 ||
            strcmp(name, "td") == 0 ||
            strcmp(name, "th") == 0 ||
-           strcmp(name, "caption") == 0 ||
-           strcmp(name, "button") == 0 ||
-           strcmp(name, "select") == 0 ||
-           strcmp(name, "li") == 0 ||
-           strcmp(name, "fieldset") == 0 ||
-           strcmp(name, "details") == 0 ||
-           strcmp(name, "summary") == 0 ||
-           strcmp(name, "object") == 0 ||
-           strcmp(name, "applet") == 0 ||
            strcmp(name, "marquee") == 0 ||
-           strcmp(name, "template") == 0 ||
-           strcmp(name, "dd") == 0 ||
-           strcmp(name, "dt") == 0;
+           strcmp(name, "object") == 0 ||
+           strcmp(name, "template") == 0;
+}
+
+/* List item scope = general scope + ol, ul */
+static int is_list_item_scoping_element(const char *name) {
+    if (!name) return 0;
+    return is_scoping_element(name) ||
+           strcmp(name, "ol") == 0 ||
+           strcmp(name, "ul") == 0;
+}
+
+/* Button scope = general scope + button */
+static int is_button_scoping_element(const char *name) {
+    if (!name) return 0;
+    return is_scoping_element(name) ||
+           strcmp(name, "button") == 0;
+}
+
+/* Table scope = html, table, template only */
+static int is_table_scoping_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "html") == 0 ||
+           strcmp(name, "table") == 0 ||
+           strcmp(name, "template") == 0;
 }
 
 static int has_element_in_scope(node_stack *st, const char *name) {
@@ -216,6 +232,39 @@ static int has_element_in_scope(node_stack *st, const char *name) {
         if (!n || !n->name) continue;
         if (strcmp(n->name, name) == 0) return 1;
         if (is_scoping_element(n->name)) return 0;
+    }
+    return 0;
+}
+
+static int has_element_in_list_item_scope(node_stack *st, const char *name) {
+    if (!name) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (!n || !n->name) continue;
+        if (strcmp(n->name, name) == 0) return 1;
+        if (is_list_item_scoping_element(n->name)) return 0;
+    }
+    return 0;
+}
+
+static int has_element_in_button_scope(node_stack *st, const char *name) {
+    if (!name) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (!n || !n->name) continue;
+        if (strcmp(n->name, name) == 0) return 1;
+        if (is_button_scoping_element(n->name)) return 0;
+    }
+    return 0;
+}
+
+static int has_element_in_table_scope(node_stack *st, const char *name) {
+    if (!name) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (!n || !n->name) continue;
+        if (strcmp(n->name, name) == 0) return 1;
+        if (is_table_scoping_element(n->name)) return 0;
     }
     return 0;
 }
@@ -1011,17 +1060,17 @@ static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mo
     if (!tag_name) return;
 
     /* Auto-close <p> when a block-like element starts, or a new <p> starts. */
-    if ((strcmp(tag_name, "p") == 0 || is_body_block_like_start(tag_name)) && stack_has_open_named(st, "p")) {
+    if ((strcmp(tag_name, "p") == 0 || is_body_block_like_start(tag_name)) && has_element_in_button_scope(st, "p")) {
         stack_pop_until(st, "p"); /* pops the matching <p> as well */
     }
 
     /* Auto-close previous <li> when a new <li> starts. */
-    if (strcmp(tag_name, "li") == 0 && stack_has_open_named(st, "li")) {
+    if (strcmp(tag_name, "li") == 0 && has_element_in_list_item_scope(st, "li")) {
         stack_pop_until(st, "li");
     }
 
     /* Auto-close <dt>/<dd> when the other starts. */
-    if ((strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) && (stack_has_open_named(st, "dt") || stack_has_open_named(st, "dd"))) {
+    if ((strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) && (has_element_in_scope(st, "dt") || has_element_in_scope(st, "dd"))) {
         stack_pop_until(st, "dt");
         stack_pop_until(st, "dd");
     }
@@ -1067,7 +1116,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         return;
     }
     if (name && strcmp(name, "table") == 0) {
-        if (stack_has_open_named(st, "p")) {
+        if (has_element_in_button_scope(st, "p")) {
             stack_pop_until(st, "p");
         }
         ensure_body(doc, st, html, body);
@@ -1493,7 +1542,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         break;
                     }
                     if (t->name && strcmp(t->name, "table") == 0) {
-                        if (!stack_has_open_named(&st, "table")) {
+                        if (!has_element_in_table_scope(&st, "table")) {
                             break;
                         }
                         if (mode == MODE_IN_CELL) {
@@ -1503,30 +1552,30 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         mode = MODE_IN_BODY;
                         break;
                     }
-                    if (t->name && strcmp(t->name, "tr") == 0 && mode == MODE_IN_ROW && stack_has_open_named(&st, "tr")) {
+                    if (t->name && strcmp(t->name, "tr") == 0 && mode == MODE_IN_ROW && has_element_in_table_scope(&st, "tr")) {
                         stack_pop_until(&st, "tr");
                         mode = stack_has_open_table_section(&st) ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
                         break;
                     }
-                    if (t->name && is_cell_element(t->name) && mode == MODE_IN_CELL && stack_has_open_named(&st, t->name)) {
+                    if (t->name && is_cell_element(t->name) && mode == MODE_IN_CELL && has_element_in_table_scope(&st, t->name)) {
                         stack_pop_until(&st, t->name);
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
-                    if (t->name && is_table_section_element(t->name) && mode == MODE_IN_CELL && stack_has_open_named(&st, t->name)) {
+                    if (t->name && is_table_section_element(t->name) && mode == MODE_IN_CELL && has_element_in_table_scope(&st, t->name)) {
                         close_cell(&st, &fmt);
                         stack_pop_until(&st, t->name);
                         mode = MODE_IN_TABLE;
                         break;
                     }
                     if (t->name && is_table_section_element(t->name) && (mode == MODE_IN_TABLE || mode == MODE_IN_TABLE_BODY) &&
-                        stack_has_open_named(&st, t->name)) {
+                        has_element_in_table_scope(&st, t->name)) {
                         stack_pop_until(&st, t->name);
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t->name && strcmp(t->name, "caption") == 0 && mode == MODE_IN_CAPTION && stack_has_open_named(&st, "caption")) {
+                    if (t->name && strcmp(t->name, "caption") == 0 && mode == MODE_IN_CAPTION && has_element_in_table_scope(&st, "caption")) {
                         stack_pop_until(&st, "caption");
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
@@ -1987,7 +2036,7 @@ node *build_tree_from_input(const char *input) {
                         break;
                     }
                     if (t.name && strcmp(t.name, "table") == 0) {
-                        if (!stack_has_open_named(&st, "table")) {
+                        if (!has_element_in_table_scope(&st, "table")) {
                             break;
                         }
                         if (mode == MODE_IN_CELL) {
@@ -1997,30 +2046,30 @@ node *build_tree_from_input(const char *input) {
                         mode = MODE_IN_BODY;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW && stack_has_open_named(&st, "tr")) {
+                    if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW && has_element_in_table_scope(&st, "tr")) {
                         stack_pop_until(&st, "tr");
                         mode = stack_has_open_table_section(&st) ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && is_cell_element(t.name) && mode == MODE_IN_CELL && stack_has_open_named(&st, t.name)) {
+                    if (t.name && is_cell_element(t.name) && mode == MODE_IN_CELL && has_element_in_table_scope(&st, t.name)) {
                         stack_pop_until(&st, t.name);
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
-                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_CELL && stack_has_open_named(&st, t.name)) {
+                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_CELL && has_element_in_table_scope(&st, t.name)) {
                         close_cell(&st, &fmt);
                         stack_pop_until(&st, t.name);
                         mode = MODE_IN_TABLE;
                         break;
                     }
                     if (t.name && is_table_section_element(t.name) && (mode == MODE_IN_TABLE || mode == MODE_IN_TABLE_BODY) &&
-                        stack_has_open_named(&st, t.name)) {
+                        has_element_in_table_scope(&st, t.name)) {
                         stack_pop_until(&st, t.name);
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && stack_has_open_named(&st, "caption")) {
+                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && has_element_in_table_scope(&st, "caption")) {
                         stack_pop_until(&st, "caption");
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
@@ -2382,7 +2431,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         break;
                     }
                     /* End-tag mode transitions for table/cell/row/section/select/caption */
-                    if (t.name && strcmp(t.name, "table") == 0 && stack_has_open_named(&st, "table")) {
+                    if (t.name && strcmp(t.name, "table") == 0 && has_element_in_table_scope(&st, "table")) {
                         if (mode == MODE_IN_CELL) {
                             formatting_clear_to_marker(&fmt);
                         }
@@ -2390,24 +2439,24 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         mode = MODE_IN_BODY;
                         break;
                     }
-                    if (t.name && is_cell_element(t.name) && (mode == MODE_IN_CELL) && stack_has_open_named(&st, t.name)) {
+                    if (t.name && is_cell_element(t.name) && (mode == MODE_IN_CELL) && has_element_in_table_scope(&st, t.name)) {
                         stack_pop_until(&st, t.name);
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_ROW;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW && stack_has_open_named(&st, "tr")) {
+                    if (t.name && strcmp(t.name, "tr") == 0 && mode == MODE_IN_ROW && has_element_in_table_scope(&st, "tr")) {
                         stack_pop_until(&st, "tr");
                         mode = stack_has_open_named(&st, "tbody") || stack_has_open_named(&st, "thead") || stack_has_open_named(&st, "tfoot")
                                ? MODE_IN_TABLE_BODY : MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_TABLE_BODY && stack_has_open_named(&st, t.name)) {
+                    if (t.name && is_table_section_element(t.name) && mode == MODE_IN_TABLE_BODY && has_element_in_table_scope(&st, t.name)) {
                         stack_pop_until(&st, t.name);
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && stack_has_open_named(&st, "caption")) {
+                    if (t.name && strcmp(t.name, "caption") == 0 && mode == MODE_IN_CAPTION && has_element_in_table_scope(&st, "caption")) {
                         stack_pop_until(&st, "caption");
                         formatting_clear_to_marker(&fmt);
                         mode = MODE_IN_TABLE;
