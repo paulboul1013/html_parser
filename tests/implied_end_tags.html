@@ -1,0 +1,20 @@
+<!-- Test 1: </li> should generate implied end tags except li -->
+<ul><li>A<li>B<li>C</ul>
+
+<!-- Test 2: </p> should generate implied end tags except p -->
+<p>one<p>two<p>three
+
+<!-- Test 3: </dd></dt> should generate implied end tags -->
+<dl><dt>T1<dd>D1<dt>T2<dd>D2</dl>
+
+<!-- Test 4: </body> should generate implied end tags -->
+<p>unclosed para
+
+<!-- Test 5: <option> auto-close -->
+<select><option>A<option>B<option>C</select>
+
+<!-- Test 6: nested li with implied close -->
+<ol><li><p>para in li<li>next</ol>
+
+<!-- Test 7: <optgroup> auto-close -->
+<select><optgroup label="g1"><option>A<option>B<optgroup label="g2"><option>C</select>

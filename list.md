@@ -90,10 +90,13 @@
   - `fmt_tag` enum、`fmt_tag_from_name()`、`fmt_tag_name()` 已涵蓋所有元素。
   - 所有 formatting elements 均進入 active formatting list，AAA 對它們均正確觸發。
 
-- **Formal "generate implied end tags" 算法** ⬜
+- **Formal "generate implied end tags" 算法** ✅
   - WHATWG §13.2.6.3 定義了 "generate implied end tags" 和 "generate implied end tags, except for X" 兩種變體。
-  - 目前°程序中，隱含關閉通過零星的 `if (strcmp(name, "p") == 0)` 等判斷散落實現。
-  - 應提取為一個集中函數，覆蓋：`dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc`。
+  - 已實現 `is_implied_end_tag_element()`、`generate_implied_end_tags()`、`generate_implied_end_tags_except()` 三個集中函數。
+  - 覆蓋元素：`dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc`。
+  - `</p>`、`</li>`、`</dd>`/`</dt>` 均有專用 end tag 處理（三個 builder 同步）。
+  - `</body>` 在 pop 前先呼叫 `generate_implied_end_tags()`。
+  - `<option>` / `<optgroup>` start tag auto-close 已統一至三個 builder。
 
 - **Quirks 模式在樹構建中的實際套用** ⬜
   - `doc_mode`（`NO_QUIRKS` / `LIMITED_QUIRKS` / `QUIRKS`）已由 DOCTYPE 正確推算。

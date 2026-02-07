@@ -269,6 +269,41 @@ static int has_element_in_table_scope(node_stack *st, const char *name) {
     return 0;
 }
 
+/* WHATWG §13.2.6.3 — implied end tag elements */
+static int is_implied_end_tag_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "dd") == 0 ||
+           strcmp(name, "dt") == 0 ||
+           strcmp(name, "li") == 0 ||
+           strcmp(name, "optgroup") == 0 ||
+           strcmp(name, "option") == 0 ||
+           strcmp(name, "p") == 0 ||
+           strcmp(name, "rb") == 0 ||
+           strcmp(name, "rp") == 0 ||
+           strcmp(name, "rt") == 0 ||
+           strcmp(name, "rtc") == 0;
+}
+
+static void generate_implied_end_tags(node_stack *st) {
+    while (st->size > 0) {
+        node *top = stack_top(st);
+        if (!top || !top->name || !is_implied_end_tag_element(top->name))
+            break;
+        stack_pop(st);
+    }
+}
+
+static void generate_implied_end_tags_except(node_stack *st, const char *except) {
+    while (st->size > 0) {
+        node *top = stack_top(st);
+        if (!top || !top->name || !is_implied_end_tag_element(top->name))
+            break;
+        if (except && strcmp(top->name, except) == 0)
+            break;
+        stack_pop(st);
+    }
+}
+
 static void formatting_push(formatting_list *fl, fmt_tag tag, node *element) {
     if (!fl || tag == FMT_NONE || !element) return;
     size_t count_same = 0;
@@ -1061,18 +1096,26 @@ static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mo
 
     /* Auto-close <p> when a block-like element starts, or a new <p> starts. */
     if ((strcmp(tag_name, "p") == 0 || is_body_block_like_start(tag_name)) && has_element_in_button_scope(st, "p")) {
-        stack_pop_until(st, "p"); /* pops the matching <p> as well */
+        generate_implied_end_tags_except(st, "p");
+        stack_pop_until(st, "p");
     }
 
     /* Auto-close previous <li> when a new <li> starts. */
     if (strcmp(tag_name, "li") == 0 && has_element_in_list_item_scope(st, "li")) {
+        generate_implied_end_tags_except(st, "li");
         stack_pop_until(st, "li");
     }
 
     /* Auto-close <dt>/<dd> when the other starts. */
-    if ((strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) && (has_element_in_scope(st, "dt") || has_element_in_scope(st, "dd"))) {
-        stack_pop_until(st, "dt");
-        stack_pop_until(st, "dd");
+    if (strcmp(tag_name, "dt") == 0 || strcmp(tag_name, "dd") == 0) {
+        if (has_element_in_scope(st, "dd")) {
+            generate_implied_end_tags_except(st, "dd");
+            stack_pop_until(st, "dd");
+        }
+        if (has_element_in_scope(st, "dt")) {
+            generate_implied_end_tags_except(st, "dt");
+            stack_pop_until(st, "dt");
+        }
     }
 
     /* Auto-close table sections and rows/cells on start of same kind. */
@@ -1506,6 +1549,17 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             /* ignore nested select */
                             break;
                         }
+                        /* Auto-close an open <option> before a new <option> or <optgroup> */
+                        if (t->name && strcmp(t->name, "option") == 0 && stack_has_open_named(&st, "option")) {
+                            stack_pop_until(&st, "option");
+                        }
+                        /* Auto-close an open <optgroup>: <option> closes it, <optgroup> closes it */
+                        if (t->name && strcmp(t->name, "optgroup") == 0 && stack_has_open_named(&st, "optgroup")) {
+                            if (stack_has_open_named(&st, "option")) {
+                                stack_pop_until(&st, "option");
+                            }
+                            stack_pop_until(&st, "optgroup");
+                        }
                         if (t->name && is_select_child_element(t->name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t->name, NULL);
@@ -1537,8 +1591,32 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         break;
                     }
                     if (t->name && strcmp(t->name, "body") == 0 && mode == MODE_IN_BODY) {
+                        generate_implied_end_tags(&st);
                         stack_pop_until(&st, "body");
                         mode = MODE_AFTER_BODY;
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "p") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_button_scope(&st, "p")) {
+                            node *parent = current_node(&st, doc);
+                            node *pn = node_create(NODE_ELEMENT, "p", NULL);
+                            node_append_child(parent, pn);
+                            break;
+                        }
+                        generate_implied_end_tags_except(&st, "p");
+                        stack_pop_until(&st, "p");
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "li") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        generate_implied_end_tags_except(&st, "li");
+                        stack_pop_until(&st, "li");
+                        break;
+                    }
+                    if (t->name && (strcmp(t->name, "dd") == 0 || strcmp(t->name, "dt") == 0) && mode == MODE_IN_BODY) {
+                        if (!has_element_in_scope(&st, t->name)) break;
+                        generate_implied_end_tags_except(&st, t->name);
+                        stack_pop_until(&st, t->name);
                         break;
                     }
                     if (t->name && strcmp(t->name, "table") == 0) {
@@ -2000,6 +2078,17 @@ node *build_tree_from_input(const char *input) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             break;
                         }
+                        /* Auto-close an open <option> before a new <option> or <optgroup> */
+                        if (t.name && strcmp(t.name, "option") == 0 && stack_has_open_named(&st, "option")) {
+                            stack_pop_until(&st, "option");
+                        }
+                        /* Auto-close an open <optgroup>: <option> closes it, <optgroup> closes it */
+                        if (t.name && strcmp(t.name, "optgroup") == 0 && stack_has_open_named(&st, "optgroup")) {
+                            if (stack_has_open_named(&st, "option")) {
+                                stack_pop_until(&st, "option");
+                            }
+                            stack_pop_until(&st, "optgroup");
+                        }
                         if (t.name && is_select_child_element(t.name)) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, t.name, NULL);
@@ -2031,8 +2120,32 @@ node *build_tree_from_input(const char *input) {
                         break;
                     }
                     if (t.name && strcmp(t.name, "body") == 0 && mode == MODE_IN_BODY) {
+                        generate_implied_end_tags(&st);
                         stack_pop_until(&st, "body");
                         mode = MODE_AFTER_BODY;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_button_scope(&st, "p")) {
+                            node *parent = current_node(&st, doc);
+                            node *pn = node_create(NODE_ELEMENT, "p", NULL);
+                            node_append_child(parent, pn);
+                            break;
+                        }
+                        generate_implied_end_tags_except(&st, "p");
+                        stack_pop_until(&st, "p");
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "li") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        generate_implied_end_tags_except(&st, "li");
+                        stack_pop_until(&st, "li");
+                        break;
+                    }
+                    if (t.name && (strcmp(t.name, "dd") == 0 || strcmp(t.name, "dt") == 0) && mode == MODE_IN_BODY) {
+                        if (!has_element_in_scope(&st, t.name)) break;
+                        generate_implied_end_tags_except(&st, t.name);
+                        stack_pop_until(&st, t.name);
                         break;
                     }
                     if (t.name && strcmp(t.name, "table") == 0) {
@@ -2399,9 +2512,16 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             break;
                         }
-                        /* Auto-close an open <option> before a new <option> */
+                        /* Auto-close an open <option> before a new <option> or <optgroup> */
                         if (t.name && strcmp(t.name, "option") == 0 && stack_has_open_named(&st, "option")) {
                             stack_pop_until(&st, "option");
+                        }
+                        /* Auto-close an open <optgroup>: <option> closes it, <optgroup> closes it */
+                        if (t.name && strcmp(t.name, "optgroup") == 0 && stack_has_open_named(&st, "optgroup")) {
+                            if (stack_has_open_named(&st, "option")) {
+                                stack_pop_until(&st, "option");
+                            }
+                            stack_pop_until(&st, "optgroup");
                         }
                         if (t.name && is_select_child_element(t.name)) {
                             parent = current_node(&st, doc);
@@ -2428,6 +2548,30 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         stack_pop_until(&st, "template");
                         if (template_mode_top > 0)
                             mode = template_mode_stack[--template_mode_top];
+                        break;
+                    }
+                    /* Dedicated end tag handlers for implied-end-tag elements */
+                    if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_button_scope(&st, "p")) {
+                            node *parent = current_node(&st, doc);
+                            node *pn = node_create(NODE_ELEMENT, "p", NULL);
+                            node_append_child(parent, pn);
+                            break;
+                        }
+                        generate_implied_end_tags_except(&st, "p");
+                        stack_pop_until(&st, "p");
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "li") == 0 && mode == MODE_IN_BODY) {
+                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        generate_implied_end_tags_except(&st, "li");
+                        stack_pop_until(&st, "li");
+                        break;
+                    }
+                    if (t.name && (strcmp(t.name, "dd") == 0 || strcmp(t.name, "dt") == 0) && mode == MODE_IN_BODY) {
+                        if (!has_element_in_scope(&st, t.name)) break;
+                        generate_implied_end_tags_except(&st, t.name);
+                        stack_pop_until(&st, t.name);
                         break;
                     }
                     /* End-tag mode transitions for table/cell/row/section/select/caption */
