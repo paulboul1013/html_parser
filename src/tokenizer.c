@@ -863,6 +863,44 @@ done:
     }
 }
 
+char *tokenizer_replace_nulls(const char *raw, size_t raw_len) {
+    if (!raw || raw_len == 0) return dup_string("");
+    /* Count NULL bytes to compute output size */
+    size_t null_count = 0;
+    for (size_t i = 0; i < raw_len; i++) {
+        if (raw[i] == '\0') null_count++;
+    }
+    if (null_count == 0) {
+        /* No NULLs — just duplicate */
+        char *out = (char *)malloc(raw_len + 1);
+        if (!out) return NULL;
+        memcpy(out, raw, raw_len);
+        out[raw_len] = '\0';
+        return out;
+    }
+    /* Each NULL (1 byte) becomes U+FFFD UTF-8 (3 bytes): net +2 per NULL */
+    size_t out_len = raw_len + null_count * 2;
+    char *out = (char *)malloc(out_len + 1);
+    if (!out) return NULL;
+    size_t j = 0;
+    size_t line = 1, col = 1;
+    for (size_t i = 0; i < raw_len; i++) {
+        if (raw[i] == '\0') {
+            printf("[parse error] line=%zu col=%zu: unexpected null character\n", line, col);
+            out[j++] = (char)0xEF;
+            out[j++] = (char)0xBF;
+            out[j++] = (char)0xBD;
+            col++;
+        } else {
+            if (raw[i] == '\n') { line++; col = 1; }
+            else { col++; }
+            out[j++] = raw[i];
+        }
+    }
+    out[j] = '\0';
+    return out;
+}
+
 void tokenizer_init(tokenizer *tz, const char *input) {
     if (!tz) return;
     tz->input = input ? input : "";

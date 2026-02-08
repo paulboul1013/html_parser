@@ -108,9 +108,11 @@
 
 ### Low
 
-- **NULL 字元替換（U+0000 → U+FFFD）** ⬜
-  - WHATWG 要求詞法分析器將輸入中的 U+0000 替換為 U+FFFD（replacement character）並拋出 parse error。
-  - 目前詞法分析器直接傳遞 NULL byte，可能導致 C 字串截斷。
+- **NULL 字元替換（U+0000 → U+FFFD）** ✅
+  - WHATWG 要求輸入中的 U+0000 替換為 U+FFFD（replacement character）並拋出 parse error。
+  - 新增 `tokenizer_replace_nulls(raw, raw_len)` 公開函式（tokenizer.h/c），在 tokenizer 初始化前預處理原始位元組。
+  - 每個 NULL 位元組替換為 U+FFFD 的 UTF-8 編碼（0xEF 0xBF 0xBD），並以正確行/列位置報告 parse error。
+  - 兩個 demo 的 `read_file()` 已更新為使用此預處理。
 
 - **Attribute context 中的 character reference 解碼** ⬜
   - WHATWG 要求在屬性值裡，字元參考只在遇到 `;` 時才解碼（比正文更嚴格）。

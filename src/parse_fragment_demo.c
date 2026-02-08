@@ -2,11 +2,13 @@
 #include <stdlib.h>
 
 #include "tree_builder.h"
+#include "tokenizer.h"
 
 static char *read_file(const char *path) {
     FILE *fp = fopen(path, "rb");
     long len;
     size_t read_len;
+    char *raw;
     char *buf;
     if (!fp) return NULL;
     fseek(fp, 0, SEEK_END);
@@ -16,14 +18,16 @@ static char *read_file(const char *path) {
         fclose(fp);
         return NULL;
     }
-    buf = (char *)malloc((size_t)len + 1);
-    if (!buf) {
+    raw = (char *)malloc((size_t)len + 1);
+    if (!raw) {
         fclose(fp);
         return NULL;
     }
-    read_len = fread(buf, 1, (size_t)len, fp);
-    buf[read_len] = '\0';
+    read_len = fread(raw, 1, (size_t)len, fp);
     fclose(fp);
+    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
+    buf = tokenizer_replace_nulls(raw, read_len);
+    free(raw);
     return buf;
 }
 
