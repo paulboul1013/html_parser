@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Comment Edge Cases Test</title>
+</head>
+
+<body>
+    <!-- Normal comment -->
+
+    <!-- Comment with internal dashes -- inside -->
+
+    <!-->
+    <p>After abrupt empty comment 1</p>
+    
+    <!--->
+    <p>After abrupt empty comment 2</p>
+
+    <!----->
+    <p>After comment with single dash content</p>
+
+    <!---->
+    <p>After standard empty comment</p>
+
+    <!--abc-->
+    <p>After normal short comment</p>
+
+    <!--a--b-->
+    <p>After comment with double dashes inside</p>
+
+    <!--test--!>
+    <p>After incorrectly closed comment</p>
+</body>
+</html>

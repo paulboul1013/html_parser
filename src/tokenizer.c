@@ -477,26 +477,213 @@ static void append_attr(token *out, const char *name, const char *value) {
 }
 
 static void parse_comment(tokenizer *tz, token *out) {
-    size_t start;
-    size_t end;
+    /*
+     * WHATWG HTML Standard §13.2.5 Comment tokenization
+     * Handles edge cases: <!-->  <!--->  <!----->  <!---->  etc.
+     */
+    typedef enum {
+        CS_COMMENT_START,
+        CS_COMMENT_START_DASH,
+        CS_COMMENT,
+        CS_COMMENT_LESS_THAN_SIGN,
+        CS_COMMENT_LESS_THAN_SIGN_BANG,
+        CS_COMMENT_LESS_THAN_SIGN_BANG_DASH,
+        CS_COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH,
+        CS_COMMENT_END_DASH,
+        CS_COMMENT_END,
+        CS_COMMENT_END_BANG
+    } comment_state;
+
+    strbuf data;
+    sb_init(&data);
+    comment_state state = CS_COMMENT_START;
+    char c;
+
     advance(tz, 4); /* "<!--" */
-    start = tz->pos;
-    while (tz->pos + 2 < tz->len) {
-        if (peek(tz, 0) == '-' && peek(tz, 1) == '-' && peek(tz, 2) == '>') {
-            end = tz->pos;
-            out->type = TOKEN_COMMENT;
-            out->data = substr_dup(tz->input, start, end);
-            advance(tz, 3);
-            return;
-        }
-        advance(tz, 1);
-    }
-    end = tz->len;
-    if (tz->pos < tz->len) {
-        advance(tz, tz->len - tz->pos);
-    }
     out->type = TOKEN_COMMENT;
-    out->data = substr_dup(tz->input, start, end);
+
+    while (tz->pos <= tz->len) {
+        c = peek(tz, 0);
+
+        switch (state) {
+            case CS_COMMENT_START:
+                if (c == '-') {
+                    state = CS_COMMENT_START_DASH;
+                    advance(tz, 1);
+                } else if (c == '>') {
+                    /* <!-->  — abrupt-closing-of-empty-comment parse error */
+                    report_error(tz, "abrupt-closing-of-empty-comment");
+                    advance(tz, 1);
+                    goto emit;
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    goto emit;
+                } else {
+                    /* Reconsume in COMMENT state */
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT_START_DASH:
+                if (c == '-') {
+                    /* Seen "<!---", next char decides */
+                    state = CS_COMMENT_END;
+                    advance(tz, 1);
+                } else if (c == '>') {
+                    /* <!--->  — abrupt-closing-of-empty-comment parse error */
+                    report_error(tz, "abrupt-closing-of-empty-comment");
+                    advance(tz, 1);
+                    goto emit;
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    sb_push_char(&data, '-');
+                    goto emit;
+                } else {
+                    /* Append '-' from COMMENT_START_DASH, reconsume in COMMENT */
+                    sb_push_char(&data, '-');
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT:
+                if (c == '<') {
+                    sb_push_char(&data, c);
+                    state = CS_COMMENT_LESS_THAN_SIGN;
+                    advance(tz, 1);
+                } else if (c == '-') {
+                    state = CS_COMMENT_END_DASH;
+                    advance(tz, 1);
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    goto emit;
+                } else {
+                    sb_push_char(&data, c);
+                    advance(tz, 1);
+                }
+                break;
+
+            case CS_COMMENT_LESS_THAN_SIGN:
+                if (c == '!') {
+                    sb_push_char(&data, c);
+                    state = CS_COMMENT_LESS_THAN_SIGN_BANG;
+                    advance(tz, 1);
+                } else if (c == '<') {
+                    sb_push_char(&data, c);
+                    advance(tz, 1);
+                    /* Stay in CS_COMMENT_LESS_THAN_SIGN */
+                } else {
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT_LESS_THAN_SIGN_BANG:
+                if (c == '-') {
+                    state = CS_COMMENT_LESS_THAN_SIGN_BANG_DASH;
+                    advance(tz, 1);
+                } else {
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT_LESS_THAN_SIGN_BANG_DASH:
+                if (c == '-') {
+                    state = CS_COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH;
+                    advance(tz, 1);
+                } else {
+                    state = CS_COMMENT_END_DASH;
+                }
+                break;
+
+            case CS_COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH:
+                if (c == '>' || c == '\0') {
+                    state = CS_COMMENT_END;
+                } else {
+                    /* nested-comment parse error */
+                    report_error(tz, "nested-comment");
+                    state = CS_COMMENT_END;
+                }
+                break;
+
+            case CS_COMMENT_END_DASH:
+                if (c == '-') {
+                    state = CS_COMMENT_END;
+                    advance(tz, 1);
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    sb_push_char(&data, '-');
+                    goto emit;
+                } else {
+                    /* Append '-' and reconsume in COMMENT */
+                    sb_push_char(&data, '-');
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT_END:
+                if (c == '>') {
+                    /* Normal end: --> */
+                    advance(tz, 1);
+                    goto emit;
+                } else if (c == '!') {
+                    state = CS_COMMENT_END_BANG;
+                    advance(tz, 1);
+                } else if (c == '-') {
+                    /* Extra '-' in "---" sequence: append one '-' to data */
+                    sb_push_char(&data, '-');
+                    advance(tz, 1);
+                    /* Stay in CS_COMMENT_END */
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '-');
+                    goto emit;
+                } else {
+                    /* "--" not followed by '>': append "--" to data, reconsume */
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '-');
+                    state = CS_COMMENT;
+                }
+                break;
+
+            case CS_COMMENT_END_BANG:
+                if (c == '-') {
+                    /* "--!-" pattern: append "--!" to data */
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '!');
+                    state = CS_COMMENT_END_DASH;
+                    advance(tz, 1);
+                } else if (c == '>') {
+                    /* "--!>" — incorrectly-closed-comment parse error, but still emit */
+                    report_error(tz, "incorrectly-closed-comment");
+                    advance(tz, 1);
+                    goto emit;
+                } else if (c == '\0') {
+                    /* EOF — eof-in-comment parse error */
+                    report_error(tz, "eof-in-comment");
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '!');
+                    goto emit;
+                } else {
+                    /* "--!X" — append "--!" to data, reconsume in COMMENT */
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '-');
+                    sb_push_char(&data, '!');
+                    state = CS_COMMENT;
+                }
+                break;
+        }
+    }
+
+emit:
+    out->data = sb_to_string(&data);
+    sb_free(&data);
 }
 
 static void parse_doctype(tokenizer *tz, token *out) {

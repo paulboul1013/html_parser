@@ -118,9 +118,9 @@
   - WHATWG 要求在屬性值裡，字元參考只在遇到 `;` 時才解碼（比正文更嚴格）。
   - 目前詞法分析器在屬性值中的容錯行為可能與規範不完全一致。
 
-- **Comment 狀態機邊緣情況** ⬜
-  - `<!--->` 和 `<!----->` 等特殊 comment 開始序列的處理（WHATWG 有獨立的 comment-less-than-sign-bang 等狀態）。
-  - 目前僅支援標準 `<!-- ... -->` 路徑。
+- **Comment 狀態機邊緣情況** ✅
+  - `<!-->` 和 `<!--->` 等特殊 comment 開始序列的處理（WHATWG 有獨立的 comment-less-than-sign-bang 等狀態）。
+  - 完整實作 WHATWG §13.2.5 定義的 10 種 comment 相關狀態。
 
 - **Encoding sniffing** ⬜
   - 目前假設輸入為 UTF-8。
