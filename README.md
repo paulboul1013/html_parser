@@ -1,138 +1,93 @@
-# html_parser（C）
+# html_parser (C)
 
-這是一個用 C 實作的 **HTML tokenizer + 最小 Tree Construction** 專案：目標是把 `text/html` 轉成可用的 DOM-like tree，並輸出 **ASCII tree** 方便人類檢查與迭代。
-
-本專案刻意走「可逐步補齊」路線：先把最常見的 HTML 行為做起來（容錯、table、格式化元素、script/rcdata），再往 WHATWG HTML Standard 的完整實作靠近。
-
----
-
-## 特色
-
-- Tokenizer
-- 支援 doctype / start-end tag / attributes / comment / text / EOF
-- 支援 RCDATA/RAWTEXT/script data（`title/textarea/style/script`）
-- Character references
-- 支援 numeric refs（十進位/十六進位，含無 `;` 容錯）
-- 支援 named entities（從 `entities.tsv` 載入完整 WHATWG 列表）
-- Parse errors
-- 直接輸出到 stdout，包含 `line/col`
-- Tree construction
-- DOM-like node tree（document/doctype/element/text/comment）
-- 最小 insertion modes：`before html`, `in head`, `in body`, `in table`, `in row`, `in cell`
-- Auto-close（最小集合）：`p/li/dt/dd/thead/tbody/tfoot/tr/td/th`
-- Active formatting（簡化版）：`b/i/em/strong` 的最小重建，避免錯誤巢狀造成 DOM 斷裂
-- 測試方式
-- 全部用 `.html` 檔跑 end-to-end，輸出 ASCII tree 供比對（`make test-html`）
+這是一個用 C 語言從零實作的 HTML5 Parser，目標是符合 WHATWG HTML Living Standard 的核心規範。
+目前已具備完整的詞法分析能力（Tokenizer）與核心的樹建構演算法（Tree Construction），能處理複雜的 HTML 結構與容錯。
 
 ---
 
-## 快速開始
+##  目前已實現功能 (Current Features)
+
+### 1. 完整的詞法分析 (Tokenizer)
+- **狀態機**: 完整實作 WHATWG 定義的 Tokenizer 狀態機，包含 `RCDATA` (`<textarea>`, `<title>`)、`RAWTEXT` (`<style>`) 與 `Script Data` (`<script>`) 的複雜狀態。
+- **Entity 解碼**: 支援 Named Character References（完整 `entities.tsv` 對照表）、十進位/十六進位編碼，以及無分號 (`;`) 的容錯解析。
+- **Script 處理**: 正確處理 `<script>` 內的如 `<!--` 等特殊跳脫序列（Escaped/Double Escaped states）。
+
+### 2. 樹建構演算法 (Tree Construction)
+從 Token 串流建構 DOM Tree，實作了以下關鍵演算法：
+- **Insertion Modes**: 完整支援 `in head`, `in body`, `in table` (含 `row`, `cell`, `caption`), `in select`, `after body` 等核心模式。
+- **Auto-close**: 自動閉合 `p`, `li`, `dt`, `dd` 等區塊級元素。
+- **Foster Parenting**: 當在 `table` 結構中出現非表格內容時，自動將其「領養」至表格之前（符合瀏覽器行為）。
+- **Active Formatting Elements**: 
+    - **Reconstruction**: 在區塊邊界重建 `b`, `i`, `strong` 等格式化元素。
+    - **Adoption Agency Algorithm (AAA)**: 處理格式化元素與區塊元素的錯誤巢狀（例如 `<b><div>...</b>`），完整實作了 Noah's Ark 條款與 Element 收養機制。
+- **Implied End Tags**: 智慧推斷並生成缺失的結束標籤。
+
+### 3. 進階功能
+- **Fragment Parsing**: 支援類似 `innerHTML` 的片段解析，能根據 Context Element 正確設定初始 Tokenizer 狀態與 Insertion Mode。
+- **Quirks Mode**: 根據 DOCTYPE 正確切換 `Quirks`、`Limited Quirks` 或 `No Quirks` 模式。
+- **Serialization**: 支援將解析後的 DOM Tree 序列化回標準 HTML 字串（含 Entity Escape 處理）。
+
+---
+
+##  與專業 HTML Parser (如 Blink, WebKit) 的差距
+
+雖然本專案已能正確解析絕大多數網頁，但與工業級瀏覽器引擎相比，仍有以下差距：
+
+### 1. 外來內容 (Foreign Content)
+- **缺口**: 尚未支援 `SVG` 與 `MathML` 命名空間。
+- **影響**: SVG 與 MathML 標籤會被視為普通的 HTML 元素，可能導致屬性解析或結構錯誤（例如 SVG 內的自閉合標籤處理）。
+
+### 2. 編碼偵測 (Encoding Sniffing)
+- **缺口**: 本專案假設輸入皆為 UTF-8。
+- **影響**: 瀏覽器會檢查 BOM、`<meta>` charset 或 Content-Type header 來決定編碼，本 Parser 則無此機制。
+
+### 3. 完整的錯誤復原 (Full Error Recovery)
+- **缺口**: 雖然所有的 Parse Error 都會被報告，但部分罕見錯誤的復原行為可能未完全符合 Spec 定義的 "stop parsing" 或特定修正邏輯。
+- **影響**: 在極端畸形的 HTML 輸入下，產生的 DOM 可能與瀏覽器稍有不同。
+
+### 4. HTML Template 元素
+- **缺口**: 對 `<template>` 的支援僅止於基本解析，尚未完整實作 Template Content 的 Document Fragment 隔離機制。
+
+### 5. Scripting & Re-entrant Parsing
+- **缺口**: 這是純 Parser，不執行 JavaScript。
+- **影響**: 無法處理 `document.write()` 這種會在中途改變 InputStream 的行為（這是瀏覽器 Parser 最複雜的部分之一）。
+
+### 6. 效能優化
+- **缺口**: Entity 查找目前使用線性搜尋，DOM 節點配置較為分散。
+- **影響**: 解析超大型文件時，效能不如使用 Trie 或 Hash Map 的工業級 Parser。
+
+---
+
+##  建置與使用
 
 ### Build
-
 ```bash
-make  html_parser
+make
 ```
-
 會產生可執行檔：`parse_html`
 
 ### 解析單一 HTML（輸出 ASCII tree）
-
 ```bash
-.parse_html html_parser/tests/sample.html
+./parse_html tests/sample.html
 ```
 
 ### 跑全部 HTML 測試
-
 ```bash
-make  html_parser test-html
+make test-html
 ```
-
-> `test-html` 會依序解析 `html_parser/tests/*.html` 並輸出 ASCII tree。若你要「自動比對 expected」，可再加 `.expected` 檔機制（目前尚未做）。
-
----
-
-## 測試資料（tests/）
-
-測試檔都放在 `html_parser/tests/`，每個檔案都在測一組特定能力：
-
-- `sample.html`：基本結構、attributes、table
-- `autoclose.html`：`p/li` 自動關閉
-- `autoclose_extended.html`：`dt/dd` + table 相關 auto-close
-- `charrefs.html`：基本 entity / numeric refs
-- `charrefs_more.html`：更多 entity + 無 `;` 容錯
-- `rcdata_rawtext_script.html`：RCDATA/RAWTEXT/script data 行為
-- `script_escaped.html`：script escaped / double escaped（最小支援）
-- `table_full.html`：完整 table 最小集合（caption/colgroup/thead/tbody/tfoot/tr/td/th）
-- `parse_errors.html`：parse error 行為與容錯輸出示範
-
-新增測試的建議流程：
-
-1. 在 `html_parser/tests/` 新增 `xxx.html`
-2. 在 `html_parser/Makefile` 的 `test-html` 目標新增一行 `./parse_html tests/xxx.html`
-3. 跑 `make -C html_parser test-html`，肉眼檢查 ASCII tree 是否符合預期
+> `test-html` 會依序解析 `tests/*.html` 並輸出 ASCII tree。
 
 ---
 
-## 輸出格式（ASCII tree）
-
-`parse_html` 會印出：
-
-1. （可選）parse error：`[parse error] line=... col=...: ...`
-2. `ASCII Tree (File)` + 樹狀結構
-
-節點會以：
-
-- `DOCUMENT`
-- `DOCTYPE name="..."`
-- `ELEMENT name="..."`
-- `TEXT data="..."`
-- `COMMENT data="..."`
-
-呈現。
+##  測試資料 (tests/)
+測試檔位於 `tests/`，涵蓋各類場景：
+- `sample.html`: 基本結構
+- `autoclose.html`: `p`/`li` 自動關閉
+- `foster_parenting.html`: Table foster parenting 測試
+- `formatting_misnest.html`: AAA 演算法測試 (Adoption Agency)
+- `fragment_basic.html`: 片段解析測試
 
 ---
 
-## Named Entities（entities.tsv）
-
-`html_parser/entities.tsv` 為 `name<TAB>value` 格式。
-
-- 專案啟動時會載入 `entities.tsv`（目前已填入完整 WHATWG 列表）
-- 若檔案不存在，會回退到內建的常用 entity 集合（仍可運作，但解碼不完整）
-
----
-
-## 專案結構
-
-- `html_parser/src/token.{h,c}`：token 結構與釋放
-- `html_parser/src/tokenizer.{h,c}`：tokenizer（含 states、char refs、parse errors）
-- `html_parser/src/tree.{h,c}`：node 結構與 ASCII dump
-- `html_parser/src/tree_builder.{h,c}`：tree construction（含 insertion modes、auto-close、active formatting 簡化）
-- `html_parser/src/parse_file_demo.c`：`parse_html` 主程式（讀檔 -> parse -> dump）
-- `html_parser/tests/`：HTML 測試檔
-- `html_parser/SPEC.md`：Implementation spec（以目前實作為準）
-- `html_parser/know.md`：給人吸收的筆記（架構、心智模型、擴充方向）
-- `html_parser/list.md`：待補清單（依優先序）
-
----
-
-## 已知限制（這不是瀏覽器級完整實作）
-
-- Tokenizer / tree construction 都是「最小可用 + 漸進補齊」，尚未完整覆蓋 WHATWG 所有狀態與 insertion modes
-- table 的 foster parenting、template insertion mode stack、完整 active formatting rules（Noah’s Ark clause）尚未實作
-- foreign content（SVG/MathML）、quirks/limited-quirks、fragment parsing 尚未實作
-- entities.tsv 是外部資料表；目前採「載入後線性掃描」比對，尚未做 trie/hash 最佳化
-
----
-
-## Roadmap
-
-下一步建議直接看：
-
-- `html_parser/list.md`（依 P0/P1/P2/P3 排序）
-
----
-
-## 參考
-
-- WHATWG HTML Standard（Living Standard）— entities / tokenization / tree construction
+## 📖 參考資料
+- **WHATWG HTML Standard**: 核心參考標準。
