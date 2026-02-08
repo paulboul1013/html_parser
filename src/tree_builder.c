@@ -700,15 +700,17 @@ static int is_body_ignored_start(const char *name);
 static int is_void_element(const char *name);
 
 static void handle_in_body_start_fragment(const char *name, int self_closing, node *doc, node_stack *st,
-                                          formatting_list *fmt, insertion_mode *mode,
+                                          formatting_list *fmt, insertion_mode *mode, doc_mode dmode,
                                           const token_attr *attrs, size_t attr_count) {
     /* Table-related tags are parse errors in IN_BODY; ignore them. */
     if (is_body_ignored_start(name)) {
         return;
     }
-    /* <table> closes an open <p>, then switches to IN_TABLE. */
+    /* <table> closes an open <p> (unless quirks mode), then switches to IN_TABLE. */
     if (name && strcmp(name, "table") == 0) {
-        body_autoclose_on_start(st, name, DOC_NO_QUIRKS);
+        if (dmode != DOC_QUIRKS && has_element_in_button_scope(st, "p")) {
+            stack_pop_until(st, "p");
+        }
         node *parent = current_node(st, doc);
         node *n = node_create(NODE_ELEMENT, "table", NULL);
         attach_attrs(n, attrs, attr_count);
@@ -1159,7 +1161,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         return;
     }
     if (name && strcmp(name, "table") == 0) {
-        if (has_element_in_button_scope(st, "p")) {
+        if (dmode != DOC_QUIRKS && has_element_in_button_scope(st, "p")) {
             stack_pop_until(st, "p");
         }
         ensure_body(doc, st, html, body);
@@ -2353,12 +2355,12 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     if (is_table_mode(mode)) {
                         node *cur = current_node(&st, doc);
                         if (cur && cur->name && !is_table_element(cur->name)) {
-                            handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
+                            handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, DOC_NO_QUIRKS, t.attrs, t.attr_count);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
-                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, DOC_NO_QUIRKS, t.attrs, t.attr_count);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -2492,7 +2494,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             mode = MODE_IN_SELECT_IN_TABLE;
                             break;
                         }
-                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, t.attrs, t.attr_count);
+                        handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode, DOC_NO_QUIRKS, t.attrs, t.attr_count);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && strcmp(t.name, "table") == 0) {
                             stack_pop_until(&st, "caption");

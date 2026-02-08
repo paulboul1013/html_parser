@@ -1,0 +1,6 @@
+<!-- No DOCTYPE at all → quirks mode -->
+<!-- In quirks mode, <table> should NOT close <p> -->
+<!-- Expected: <table> becomes foster-parented, but <p> is NOT closed -->
+<p>before table<table><tr><td>cell</td></tr></table>
+
+<p>text<table><tr><td>data</td></tr></table>

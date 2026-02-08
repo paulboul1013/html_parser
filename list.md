@@ -98,13 +98,13 @@
   - `</body>` 在 pop 前先呼叫 `generate_implied_end_tags()`。
   - `<option>` / `<optgroup>` start tag auto-close 已統一至三個 builder。
 
-- **Quirks 模式在樹構建中的實際套用** ⬜
+- **Quirks 模式在樹構建中的實際套用** ✅
   - `doc_mode`（`NO_QUIRKS` / `LIMITED_QUIRKS` / `QUIRKS`）已由 DOCTYPE 正確推算。
-  - 但目前樹構建中沒有任何地方讀取 `doc_mode` 來改變行為。
-  - 主要影響：
-    - Quirks：`<table>` 中裸露的字元參考可能套用別的規則；table 的 border/width 屬性影響計算。
-    - Limited-quirks：僅影響行內元素的盒子模型（CSS 層，非 parser 層）。
-    - Parser 層中最重要的是：quirks mode 下 `document.write` 和 `<object>` 的處理差異。
+  - WHATWG 規範中，quirks mode 對 parser 層**僅有一處**影響：
+    - `<table>` 開始標籤在 "in body" 模式下，non-quirks 會先自動關閉 `<p>`（button scope），quirks 模式則**不關閉**。
+  - 已在 `handle_in_body_start()` 與 `handle_in_body_start_fragment()` 中加入 `dmode != DOC_QUIRKS` 條件。
+  - Limited-quirks 僅影響 CSS 層（行內元素盒子模型），parser 層行為與 no-quirks 相同。
+  - 注意：先前描述的 `document.write` 和 `<object>` 差異經查證在 parser 層實際上不存在。
 
 ### Low
 

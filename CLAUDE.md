@@ -63,6 +63,7 @@ make test-html
 - 一個 `insertion_mode` 列舉（13 種模式）決定哪些令牌會被接受及如何處理 — 緊密對應 WHATWG 規範的插入模式算法。
 - 已實現的關鍵算法：
   - **自動關閉**：`p` 在遇到塊級元素開始時被關閉；`li`/`dt`/`dd` 在遇到同類兄弟元素時被關閉；表格sections（`thead`/`tbody`/`tfoot`/`tr`/`td`/`th`）在遇到新的section/行/儲元格時自動關閉。
+  - **Generate implied end tags（WHATWG §13.2.6.3）**：集中函數 `generate_implied_end_tags()` / `generate_implied_end_tags_except()` 在 `</p>`、`</li>`、`</dd>`/`</dt>`、`</body>` end tag 處理前，從棧頂反覆彈出 implied-closable 元素（`dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc`）。`<option>` / `<optgroup>` start tag 也有對應的 auto-close 邏輯。
   - **收養代理 / 活躍格式化**：`b`/`i`/`em`/`strong` 被追蹤；重建程序在中斷後重新插入它們。Noah's Ark 條款將活躍列表中每個標記限制為最多 3 條。
   - **收養父化（Foster parenting）**：在表格模式下遇到的非表格內容，將插入到 `<table>` 元素的直接前方而非內部。
   - **Quirks 模式**：由 DOCTYPE 的 public/system ID 判定。模式已儲存（`NO_QUIRKS`、`LIMITED_QUIRKS`、`QUIRKS`），但尚未用於改變樹構建規則 — 詳見 `list.md` 中的後續工作說明。
@@ -74,7 +75,7 @@ make test-html
 
 ### 樹輸出
 
-`tree.c` 中的 `tree_dump_ascii()` 使用 `|--` / `\--` 分支標記列印節點樹。每個節點顯示其類型及相關屬性（名稱、數據）。這是唯一的輸出機制 — 目前沒有將樹序列化回 HTML 的功能。
+`tree.c` 中的 `tree_dump_ascii()` 使用 `|--` / `\--` 分支標記列印節點樹。每個節點顯示其類型及相關屬性（名稱、數據）。此外，`tree_serialize_html()` 可將節點樹序列化回 HTML 字串（含 void element、raw text、RCDATA、屬性值 entity 轉換等規範化處理）。
 
 ---
 
@@ -85,7 +86,7 @@ make test-html
 | `src/token.h/c` | Token 結構及生命週期管理（init/free） |
 | `src/tokenizer.h/c` | 有狀態詞法分析器；實體裝載；字元參考解碼 |
 | `src/tree.h/c` | 節點結構、子節點連接、遞迴釋放、ASCII 輸出 |
-| `src/tree_builder.h/c` | 插入模式、自動關閉、格式化處理、收養父化、Quirks 檢測 |
+| `src/tree_builder.h/c` | 插入模式、自動關閉、generate implied end tags、格式化處理、收養父化、Quirks 檢測 |
 | `src/parse_file_demo.c` | 完整文件解析的 CLI 入口點 |
 | `src/parse_fragment_demo.c` | 片段解析的 CLI 入口點 |
 | `entities.tsv` | WHATWG 命名字元參考表（定界符分隔） |
@@ -132,10 +133,11 @@ make test-html
 | Quirks / Limited-quirks 模式判定（由 DOCTYPE 推算） | ✅ |
 | 片段解析（context element 初始化 + 特殊插入規則） | ✅ |
 
-### P3 — 進階相容（⏳ 待實現）
+### P3 — 進階相容（部分完成）
 
 | 功能 | 狀態 |
 |------|------|
+| Generate implied end tags（WHATWG §13.2.6.3，含 `</p>`/`</li>`/`</dd>`/`</dt>`/`</body>` 專用處理、`<option>`/`<optgroup>` auto-close） | ✅ |
 | Foreign content 支持（SVG / MathML 命名空間、Integration points） | ⏳ |
 | Quirks 模式對樹構建規則的實際套用 | ⏳ |
 | 完整 parser error recovery（所有 parse errors 的標準化容錯行為） | ⏳ |

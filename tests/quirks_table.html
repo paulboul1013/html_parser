@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html><body>
+<!-- Test 1: Standards mode (has proper DOCTYPE) - <table> should close <p> -->
+<!-- Expected: <p> and <table> are siblings -->
+<p>before table<table><tr><td>cell</td></tr></table>
+
+<!-- Test 2: Nested case - <p> with inline content then table -->
+<p>text<table><tr><td>data</td></tr></table>
+</body></html>

@@ -43,6 +43,8 @@ test-html: parse_html
 	./parse_html tests/big_test.html
 	./parse_html tests/scoping.html
 	./parse_html tests/implied_end_tags.html
+	./parse_html tests/quirks_table.html
+	./parse_html tests/quirks_table_quirks.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo
