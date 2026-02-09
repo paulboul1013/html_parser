@@ -114,9 +114,12 @@
   - 每個 NULL 位元組替換為 U+FFFD 的 UTF-8 編碼（0xEF 0xBF 0xBD），並以正確行/列位置報告 parse error。
   - 兩個 demo 的 `read_file()` 已更新為使用此預處理。
 
-- **Attribute context 中的 character reference 解碼** ⬜
-  - WHATWG 要求在屬性值裡，字元參考只在遇到 `;` 時才解碼（比正文更嚴格）。
-  - 目前詞法分析器在屬性值中的容錯行為可能與規範不完全一致。
+- **Attribute context 中的 character reference 解碼** ✅
+  - WHATWG 要求在屬性值裡，legacy 實體無分號時後接 `=` 或 alnum 不解碼（比正文更嚴格）。
+  - `named_entity` 新增 `legacy` 欄位區分 legacy / non-legacy 實體。
+  - `match_named_entity()` 依 `in_attribute` 參數實現不同的匹配規則。
+  - `decode_character_references()` 新增 `in_attribute` 參數；數字參考無分號一律解碼。
+  - `entities.tsv` 載入時自動去重標記 legacy（同名實體出現兩次 → legacy=1）。
 
 - **Comment 狀態機邊緣情況** ✅
   - `<!-->` 和 `<!--->` 等特殊 comment 開始序列的處理（WHATWG 有獨立的 comment-less-than-sign-bang 等狀態）。

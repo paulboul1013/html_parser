@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>Charref Attribute vs Text Context</title></head>
+<body>
+
+<!-- Named entity with semicolon: always decoded -->
+<p>&copy;</p>
+
+<!-- Legacy entity without semicolon, followed by space (text): decoded -->
+<p>&copy next</p>
+
+<!-- Legacy entity without semicolon, followed by '=' (text): decoded -->
+<p>&copy=2</p>
+
+<!-- Legacy entity without semicolon, followed by alnum (text): NOT decoded -->
+<p>&copyX</p>
+
+<!-- Non-legacy entity without semicolon (text): NOT decoded -->
+<p>&hearts next</p>
+
+<!-- Numeric reference without semicolon (text): always decoded -->
+<p>&#169abc</p>
+
+<!-- Attribute: legacy entity without semicolon, followed by '=' -->
+<a href="?a=1&copy=2">copy=2 in attr</a>
+
+<!-- Attribute: legacy entity without semicolon, followed by space -->
+<a href="&copy next">copy space in attr</a>
+
+<!-- Attribute: legacy entity without semicolon, followed by alnum -->
+<a href="&copyX">copyX in attr</a>
+
+<!-- Attribute: non-legacy entity without semicolon -->
+<a href="&hearts next">hearts in attr</a>
+
+<!-- Attribute: numeric ref without semicolon -->
+<a href="&#169abc">numeric no semi in attr</a>
+
+<!-- Named entity with semicolon in attr -->
+<a href="&copy;">copy with semi in attr</a>
+
+</body>
+</html>

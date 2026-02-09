@@ -46,6 +46,7 @@ test-html: parse_html
 	./parse_html tests/quirks_table.html
 	./parse_html tests/quirks_table_quirks.html
 	./parse_html tests/null_replacement.html
+	./parse_html tests/charref_attr_vs_text.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

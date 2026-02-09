@@ -155,6 +155,7 @@ static size_t encode_utf8(unsigned int codepoint, char *out) {
 typedef struct {
     char *name;
     char *value;
+    int legacy;  /* 1 = this entity has a no-semicolon form (WHATWG legacy table) */
 } named_entity;
 
 static int is_ascii_alnum(char c) {
@@ -178,12 +179,20 @@ static void entities_cleanup(void) {
     g_entities_loaded = 0;
 }
 
-static void entities_add(const char *name, const char *value) {
+static void entities_add(const char *name, const char *value, int legacy) {
+    /* Dedup: if name already exists, mark as legacy and skip */
+    for (size_t i = 0; i < g_entities_count; ++i) {
+        if (g_entities[i].name && strcmp(g_entities[i].name, name) == 0) {
+            g_entities[i].legacy = 1;
+            return;
+        }
+    }
     named_entity *next = (named_entity *)realloc(g_entities, sizeof(named_entity) * (g_entities_count + 1));
     if (!next) return;
     g_entities = next;
     g_entities[g_entities_count].name = dup_string(name);
     g_entities[g_entities_count].value = dup_string(value);
+    g_entities[g_entities_count].legacy = legacy;
     g_entities_count++;
 }
 
@@ -200,7 +209,7 @@ static void entities_load_from_file(const char *path) {
         char *nl = strchr(value, '\n');
         if (nl) *nl = '\0';
         if (name[0] == '\0' || value[0] == '\0') continue;
-        entities_add(name, value);
+        entities_add(name, value, 0);
     }
     fclose(fp);
 }
@@ -215,59 +224,79 @@ static void entities_load_once(void) {
 
     /* Fallback to built-in common entities */
     if (g_entities_count == 0) {
-        entities_add("amp", "&");
-        entities_add("lt", "<");
-        entities_add("gt", ">");
-        entities_add("quot", "\"");
-        entities_add("apos", "'");
-        entities_add("nbsp", "\xC2\xA0");
-        entities_add("copy", "\xC2\xA9");
-        entities_add("reg", "\xC2\xAE");
-        entities_add("trade", "\xE2\x84\xA2");
-        entities_add("cent", "\xC2\xA2");
-        entities_add("pound", "\xC2\xA3");
-        entities_add("yen", "\xC2\xA5");
-        entities_add("euro", "\xE2\x82\xAC");
-        entities_add("deg", "\xC2\xB0");
-        entities_add("plusmn", "\xC2\xB1");
-        entities_add("times", "\xC3\x97");
-        entities_add("divide", "\xC3\xB7");
-        entities_add("ndash", "\xE2\x80\x93");
-        entities_add("mdash", "\xE2\x80\x94");
-        entities_add("hellip", "\xE2\x80\xA6");
-        entities_add("middot", "\xC2\xB7");
-        entities_add("laquo", "\xC2\xAB");
-        entities_add("raquo", "\xC2\xBB");
-        entities_add("lsquo", "\xE2\x80\x98");
-        entities_add("rsquo", "\xE2\x80\x99");
-        entities_add("ldquo", "\xE2\x80\x9C");
-        entities_add("rdquo", "\xE2\x80\x9D");
-        entities_add("sect", "\xC2\xA7");
-        entities_add("para", "\xC2\xB6");
-        entities_add("bull", "\xE2\x80\xA2");
+        /* legacy=1: these entities have a no-semicolon form in WHATWG */
+        entities_add("amp", "&", 1);
+        entities_add("lt", "<", 1);
+        entities_add("gt", ">", 1);
+        entities_add("quot", "\"", 1);
+        entities_add("apos", "'", 0);
+        entities_add("nbsp", "\xC2\xA0", 1);
+        entities_add("copy", "\xC2\xA9", 1);
+        entities_add("reg", "\xC2\xAE", 1);
+        entities_add("trade", "\xE2\x84\xA2", 0);
+        entities_add("cent", "\xC2\xA2", 1);
+        entities_add("pound", "\xC2\xA3", 1);
+        entities_add("yen", "\xC2\xA5", 1);
+        entities_add("euro", "\xE2\x82\xAC", 0);
+        entities_add("deg", "\xC2\xB0", 1);
+        entities_add("plusmn", "\xC2\xB1", 1);
+        entities_add("times", "\xC3\x97", 1);
+        entities_add("divide", "\xC3\xB7", 1);
+        entities_add("ndash", "\xE2\x80\x93", 0);
+        entities_add("mdash", "\xE2\x80\x94", 0);
+        entities_add("hellip", "\xE2\x80\xA6", 0);
+        entities_add("middot", "\xC2\xB7", 1);
+        entities_add("laquo", "\xC2\xAB", 1);
+        entities_add("raquo", "\xC2\xBB", 1);
+        entities_add("lsquo", "\xE2\x80\x98", 0);
+        entities_add("rsquo", "\xE2\x80\x99", 0);
+        entities_add("ldquo", "\xE2\x80\x9C", 0);
+        entities_add("rdquo", "\xE2\x80\x9D", 0);
+        entities_add("sect", "\xC2\xA7", 1);
+        entities_add("para", "\xC2\xB6", 1);
+        entities_add("bull", "\xE2\x80\xA2", 0);
     }
 }
 
-static const char *match_named_entity(const char *s, size_t *consumed, int allow_missing_semicolon) {
+static const char *match_named_entity(const char *s, size_t *consumed, int in_attribute) {
     entities_load_once();
+    const char *best_value = NULL;
+    size_t best_consumed = 0;
     for (size_t i = 0; i < g_entities_count; ++i) {
         const char *name = g_entities[i].name;
         size_t nlen = strlen(name);
-        if (strncmp(s, name, nlen) == 0) {
-            if (s[nlen] == ';') {
-                *consumed = nlen + 1;
-                return g_entities[i].value;
+        if (strncmp(s, name, nlen) != 0) continue;
+        char after = s[nlen];
+        if (after == ';') {
+            /* With semicolon: always match; prefer longest match */
+            if (nlen + 1 > best_consumed) {
+                best_consumed = nlen + 1;
+                best_value = g_entities[i].value;
             }
-            if (allow_missing_semicolon && !is_ascii_alnum(s[nlen]) && s[nlen] != '=') {
-                *consumed = nlen;
-                return g_entities[i].value;
-            }
+            continue;
+        }
+        /* Without semicolon: only legacy entities can match */
+        if (!g_entities[i].legacy) continue;
+        if (in_attribute) {
+            /* Attribute context: '=' or alnum after entity name → no match */
+            if (after == '=' || is_ascii_alnum(after)) continue;
+        } else {
+            /* Text context: alnum after → no match (name may continue) */
+            if (is_ascii_alnum(after)) continue;
+        }
+        /* Match without semicolon (parse error, handled by caller) */
+        if (nlen > best_consumed) {
+            best_consumed = nlen;
+            best_value = g_entities[i].value;
         }
     }
-    return NULL;
+    if (best_value) {
+        *consumed = best_consumed;
+    }
+    return best_value;
 }
 
-static char *decode_character_references(const char *s) {
+static char *decode_character_references(const char *s, int in_attribute) {
     size_t cap = strlen(s) + 1;
     size_t len = 0;
     char *out = (char *)malloc(cap);
@@ -316,7 +345,7 @@ static char *decode_character_references(const char *s) {
                 i = j + 1;
                 continue;
             }
-            if (j > start && s[j] != ';' && !is_ascii_alnum(s[j]) && s[j] != '=') {
+            if (j > start && s[j] != ';') {
                 char buf[4];
                 size_t n = encode_utf8(codepoint, buf);
                 if (len + n + 1 > cap) {
@@ -331,7 +360,7 @@ static char *decode_character_references(const char *s) {
             }
         } else {
             size_t consumed = 0;
-            const char *value = match_named_entity(s + j, &consumed, 1);
+            const char *value = match_named_entity(s + j, &consumed, in_attribute);
             if (value) {
                 size_t vlen = strlen(value);
                 if (len + vlen + 1 > cap) {
@@ -957,7 +986,7 @@ static void parse_start_tag(tokenizer *tz, token *out) {
             case ST_ATTR_VALUE_DQ:
                 if (c == '"') {
                     char *av = sb_to_string(&attr_value);
-                    char *decoded = decode_character_references(av);
+                    char *decoded = decode_character_references(av, 1);
                     char *an = sb_to_string(&attr_name);
                     append_attr(out, an ? an : "", decoded ? decoded : "");
                     free(an);
@@ -975,7 +1004,7 @@ static void parse_start_tag(tokenizer *tz, token *out) {
             case ST_ATTR_VALUE_SQ:
                 if (c == '\'') {
                     char *av = sb_to_string(&attr_value);
-                    char *decoded = decode_character_references(av);
+                    char *decoded = decode_character_references(av, 1);
                     char *an = sb_to_string(&attr_name);
                     append_attr(out, an ? an : "", decoded ? decoded : "");
                     free(an);
@@ -993,7 +1022,7 @@ static void parse_start_tag(tokenizer *tz, token *out) {
             case ST_ATTR_VALUE_UQ:
                 if (is_ascii_whitespace(c)) {
                     char *av = sb_to_string(&attr_value);
-                    char *decoded = decode_character_references(av);
+                    char *decoded = decode_character_references(av, 1);
                     char *an = sb_to_string(&attr_name);
                     append_attr(out, an ? an : "", decoded ? decoded : "");
                     free(an);
@@ -1003,7 +1032,7 @@ static void parse_start_tag(tokenizer *tz, token *out) {
                     advance(tz, 1);
                 } else if (c == '>') {
                     char *av = sb_to_string(&attr_value);
-                    char *decoded = decode_character_references(av);
+                    char *decoded = decode_character_references(av, 1);
                     char *an = sb_to_string(&attr_name);
                     append_attr(out, an ? an : "", decoded ? decoded : "");
                     free(an);
@@ -1184,7 +1213,7 @@ void tokenizer_next(tokenizer *tz, token *out) {
         out->type = TOKEN_CHARACTER;
         out->data = substr_dup(tz->input, tz->pos, end);
         if (out->data && tz->state == TOKENIZE_RCDATA) {
-            char *decoded = decode_character_references(out->data);
+            char *decoded = decode_character_references(out->data, 0);
             if (decoded) {
                 free(out->data);
                 out->data = decoded;
@@ -1256,7 +1285,7 @@ void tokenizer_next(tokenizer *tz, token *out) {
     out->type = TOKEN_CHARACTER;
     out->data = substr_dup(tz->input, start, tz->pos);
     if (out->data) {
-        char *decoded = decode_character_references(out->data);
+        char *decoded = decode_character_references(out->data, 0);
         if (decoded) {
             free(out->data);
             out->data = decoded;
