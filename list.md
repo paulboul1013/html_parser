@@ -1,160 +1,423 @@
-# html_parser 待補完整功能清單（最小拆解版）
+# html_parser — WHATWG HTML Standard 完整功能差距分析
 
-以下依「優先順序」排列，優先解決最影響正確性的缺口。每一項都是**可獨立實作**的小任務。
+本文件系統性地列出 WHATWG HTML Living Standard（§13 Parsing）中定義的所有解析相關功能，並標注本專案的實作狀態。
 
----
-
-## P0（最先做）— 核心詞法分析
-
-- **Tokenizer：完整 state machine（核心狀態）** ✅ 已完成
-  - Tag open / End tag open / Tag name ✅
-  - Attribute name / Attribute value（雙引號 / 單引號 / 無引號）✅
-  - Comment 與 Doctype 的完整狀態與容錯 ✅
-- **Script data 特殊規則** ✅ 已完成（最小支援）
-  - `<script>` 內的 `</script>` 偵測 ✅
-  - `script data escaped` / `double escaped` ✅
-- **Character references 完整化** ✅ 已完成
-  - 加入完整 named entities 表 ✅（`entities.tsv` 已填入完整 WHATWG 列表）
-  - 更精確的容錯規則（無 `;`，只在允許的 context 解碼）✅
+**圖例**：✅ 已完成　⬜ 未實作　🔧 部分實作
 
 ---
 
-## P1（緊接著做）— 樹構建核心
+## 一、Tokenizer（§13.2.5 Tokenization）
 
-- **Tree construction：完整 insertion modes（核心缺口）** ✅
-  - `in table body`, `in row`, `in cell`, `in caption` ✅
-  - `in select`, `in select in table` ✅
-  - `after body`, `after after body` ✅
-- **Foster parenting（table 內錯誤節點）** ✅
-  - 非 table 內容插入 table 前的行為 ✅
-- **Active formatting elements 完整重建** ✅
-  - Noah's Ark clause ✅
-  - Scope 概念與正確重建 ✅
-  - FMT_MARKER 隔離（cell / caption 邊界）✅
+### 1.1 Tokenizer 狀態機（共 80 種狀態）
 
----
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| Data state | ✅ | |
+| RCDATA state | ✅ | `<title>`, `<textarea>` |
+| RAWTEXT state | ✅ | `<style>` |
+| Script data state | ✅ | |
+| Script data escaped state | ✅ | `<!--` 偵測 |
+| Script data double escaped state | ✅ | |
+| PLAINTEXT state | ⬜ | `<plaintext>` 觸發，極罕見 |
+| Tag open state | ✅ | |
+| End tag open state | ✅ | |
+| Tag name state | ✅ | |
+| Before attribute name state | ✅ | |
+| Attribute name state | ✅ | |
+| After attribute name state | ✅ | |
+| Before attribute value state | ✅ | |
+| Attribute value (double-quoted) state | ✅ | |
+| Attribute value (single-quoted) state | ✅ | |
+| Attribute value (unquoted) state | ✅ | |
+| After attribute value (quoted) state | ✅ | |
+| Self-closing start tag state | ✅ | |
+| Bogus comment state | ✅ | `<!X` 觸發 |
+| Markup declaration open state | ✅ | `<!--`, `<!DOCTYPE>` |
+| Comment start state | ✅ | |
+| Comment start dash state | ✅ | |
+| Comment state | ✅ | |
+| Comment less-than sign state | ✅ | |
+| Comment less-than sign bang state | ✅ | |
+| Comment less-than sign bang dash state | ✅ | |
+| Comment less-than sign bang dash dash state | ✅ | |
+| Comment end dash state | ✅ | |
+| Comment end state | ✅ | |
+| Comment end bang state | ✅ | |
+| DOCTYPE state | ✅ | |
+| Before DOCTYPE name state | ✅ | |
+| DOCTYPE name state | ✅ | |
+| After DOCTYPE name state | ✅ | |
+| After DOCTYPE public keyword state | ✅ | |
+| Before DOCTYPE public identifier state | ✅ | |
+| DOCTYPE public identifier (double-quoted) state | ✅ | |
+| DOCTYPE public identifier (single-quoted) state | ✅ | |
+| After DOCTYPE public identifier state | ✅ | |
+| Between DOCTYPE public and system identifiers state | ✅ | |
+| After DOCTYPE system keyword state | ✅ | |
+| Before DOCTYPE system identifier state | ✅ | |
+| DOCTYPE system identifier (double-quoted) state | ✅ | |
+| DOCTYPE system identifier (single-quoted) state | ✅ | |
+| After DOCTYPE system identifier state | ✅ | |
+| Bogus DOCTYPE state | ✅ | |
+| CDATA section state | ⬜ | 僅 Foreign Content 需要，HTML 中為 parse error |
+| CDATA section bracket state | ⬜ | |
+| CDATA section end state | ⬜ | |
+| Character reference state | ✅ | |
+| Named character reference state | ✅ | |
+| Ambiguous ampersand state | ✅ | |
+| Numeric character reference state | ✅ | |
+| Hexadecimal character reference start state | ✅ | |
+| Decimal character reference start state | ✅ | |
+| Hexadecimal character reference state | ✅ | |
+| Decimal character reference state | ✅ | |
+| Numeric character reference end state | ✅ | |
+| Script data less-than sign state | 🔧 | 以 marker-based 方式實作 |
+| Script data end tag open state | 🔧 | |
+| Script data end tag name state | 🔧 | |
+| Script data escape start state | 🔧 | |
+| Script data escape start dash state | 🔧 | |
+| Script data escaped state | ✅ | |
+| Script data escaped dash state | 🔧 | |
+| Script data escaped dash dash state | 🔧 | |
+| Script data escaped less-than sign state | 🔧 | |
+| Script data escaped end tag open state | 🔧 | |
+| Script data escaped end tag name state | 🔧 | |
+| Script data double escape start state | 🔧 | |
+| Script data double escaped state | ✅ | |
+| Script data double escaped dash state | 🔧 | |
+| Script data double escaped dash dash state | 🔧 | |
+| Script data double escaped less-than sign state | 🔧 | |
+| Script data double escape end state | 🔧 | |
+| RCDATA less-than sign state | 🔧 | 用 `find_end_tag()` 替代狀態機 |
+| RCDATA end tag open state | 🔧 | |
+| RCDATA end tag name state | 🔧 | |
+| RAWTEXT less-than sign state | 🔧 | 用 `find_end_tag()` 替代狀態機 |
+| RAWTEXT end tag open state | 🔧 | |
+| RAWTEXT end tag name state | 🔧 | |
 
-## P2（中期補完）
+**小結**：80 個狀態中 ~48 個完整實作，~16 個用替代方式實作（功能等效），~3 個未實作（PLAINTEXT + CDATA × 3）。RCDATA/RAWTEXT/Script 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
 
-- **Quirks / Limited-quirks 模式**
-  - 完整 doctype 判定規則 ✅
-  - 影響 tree construction 的模式切換 ⬜（偵測已完成，執行未實現 — 見 P3）
-- **Fragment parsing** ✅
-  - context element 的 tokenizer 初始化 ✅
-  - fragment tree 的特殊插入規則 ✅
+### 1.2 Character References
 
----
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| Named character references（完整 2,231 實體） | ✅ | `entities.tsv` |
+| Numeric character references（十進位 `&#123;`） | ✅ | |
+| Numeric character references（十六進位 `&#x7B;`） | ✅ | |
+| 無分號容錯（legacy entities） | ✅ | |
+| Attribute context 中的差異處理（`=` / alnum 後不解碼） | ✅ | |
+| Numeric reference 範圍修正（§13.2.5.5 table） | ⬜ | 如 `&#128;` → U+20AC 等 Windows-1252 修正表 |
+| Noncharacter / surrogate 偵測 | ⬜ | 數字解碼後未檢查 noncharacter 範圍 |
 
-## P3（進階/完整相容）— 現有待實現項目
+### 1.3 Token 類型
 
-以下分為 **Critical（影響輸出正確性）**、**Medium（影響兼容度）**、**Low（邊緣情況）** 三層。
+| Token 類型 | 狀態 |
+|-----------|------|
+| DOCTYPE | ✅ |
+| Start tag（含 attrs, self-closing） | ✅ |
+| End tag | ✅ |
+| Comment | ✅ |
+| Character | ✅ |
+| EOF | ✅ |
 
-### Critical
+### 1.4 輸入前處理
 
-- **Node 節點屬性（attrs）支持** ✅
-  - 目前 `token` struct 已解析出 `attrs[]`（name + value），但 `node` struct 僅有 `name` / `data`。
-  - 任何屬性（`class`, `id`, `href`, `src` 等）在樹構建時全部丟失。
-  - 需要做的事：
-    1. 在 `node` struct 中新增 `token_attr *attrs; size_t attr_count;`
-    2. 在 `tree_builder` 裡將 `token.attrs[]` 複製到新建的 `node`
-    3. 在 `tree_dump_ascii()` 裡列印屬性
-  - 這是單一最大的功能缺口。
-
-- **HTML serialization（樹 → HTML 字串）** ✅
-  - `tree_serialize_html(node *root)` 將樹序列化回 HTML 字串
-  - 已實現完整的規範化序列化：
-    - 空元素（void elements）不輸出 end tag ✓
-    - Raw text 元素（`<script>`, `<style>`）內容不做 HTML entity 轉換 ✓
-    - RCDATA 元素（`<textarea>`, `<title>`）內容做 entity 轉換 ✓
-    - 一般文本做 `&amp;` / `&lt;` / `&gt;` 轉換 ✓
-    - 屬性值做 `&quot;` / `&amp;` 轉換 ✓
-  - 測試程式：`serialize_demo` — 讀取 HTML 文件並輸出序列化結果
-  - Makefile 目標：`make test-serialize` 驗證序列化功能
-
-### Medium
-
-- **Adoption Agency Algorithm（AAA）補完** ✅
-  - 完整實現 WHATWG §13.2.6.4，包含 furthest block 路徑（outer loop + inner loop + replacement element 建立）。
-  - 新增 `is_special_element()` 完整列表、`clone_element_shallow()`、stack/formatting list 索引操作。
-  - `tree.c` 新增 `node_remove_child()` 和 `node_reparent_children()` 用於 AAA 子節點搬移。
-  - 三處 builder 函數的 end tag 格式化處理統一由 `adoption_agency()` 處理。
-
-- **Scoping elements 列表補完** ✅
-  - `is_scoping_element()` 現在僅保留 WHATWG general scope 障壁（applet, caption, html, table, td, th, marquee, object, template）。
-  - 新增 4 種 scope 類型：general scope、list item scope（+ol, ul）、button scope（+button）、table scope（html, table, template）。
-  - 新增 `has_element_in_list_item_scope()`、`has_element_in_button_scope()`、`has_element_in_table_scope()`。
-  - `<p>` 自動關閉使用 button scope；`<li>` 自動關閉使用 list item scope；table end tag 使用 table scope。
-
-- **Formatting elements 列表擴充** ✅
-  - 已支援完整 WHATWG §13.2.6.1 定義的全部 14 個 formatting elements：`a`, `b`, `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`, `strong`, `tt`, `u`。
-  - `fmt_tag` enum、`fmt_tag_from_name()`、`fmt_tag_name()` 已涵蓋所有元素。
-  - 所有 formatting elements 均進入 active formatting list，AAA 對它們均正確觸發。
-
-- **Formal "generate implied end tags" 算法** ✅
-  - WHATWG §13.2.6.3 定義了 "generate implied end tags" 和 "generate implied end tags, except for X" 兩種變體。
-  - 已實現 `is_implied_end_tag_element()`、`generate_implied_end_tags()`、`generate_implied_end_tags_except()` 三個集中函數。
-  - 覆蓋元素：`dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc`。
-  - `</p>`、`</li>`、`</dd>`/`</dt>` 均有專用 end tag 處理（三個 builder 同步）。
-  - `</body>` 在 pop 前先呼叫 `generate_implied_end_tags()`。
-  - `<option>` / `<optgroup>` start tag auto-close 已統一至三個 builder。
-
-- **Quirks 模式在樹構建中的實際套用** ✅
-  - `doc_mode`（`NO_QUIRKS` / `LIMITED_QUIRKS` / `QUIRKS`）已由 DOCTYPE 正確推算。
-  - WHATWG 規範中，quirks mode 對 parser 層**僅有一處**影響：
-    - `<table>` 開始標籤在 "in body" 模式下，non-quirks 會先自動關閉 `<p>`（button scope），quirks 模式則**不關閉**。
-  - 已在 `handle_in_body_start()` 與 `handle_in_body_start_fragment()` 中加入 `dmode != DOC_QUIRKS` 條件。
-  - Limited-quirks 僅影響 CSS 層（行內元素盒子模型），parser 層行為與 no-quirks 相同。
-  - 注意：先前描述的 `document.write` 和 `<object>` 差異經查證在 parser 層實際上不存在。
-
-### Low
-
-- **NULL 字元替換（U+0000 → U+FFFD）** ✅
-  - WHATWG 要求輸入中的 U+0000 替換為 U+FFFD（replacement character）並拋出 parse error。
-  - 新增 `tokenizer_replace_nulls(raw, raw_len)` 公開函式（tokenizer.h/c），在 tokenizer 初始化前預處理原始位元組。
-  - 每個 NULL 位元組替換為 U+FFFD 的 UTF-8 編碼（0xEF 0xBF 0xBD），並以正確行/列位置報告 parse error。
-  - 兩個 demo 的 `read_file()` 已更新為使用此預處理。
-
-- **Attribute context 中的 character reference 解碼** ✅
-  - WHATWG 要求在屬性值裡，legacy 實體無分號時後接 `=` 或 alnum 不解碼（比正文更嚴格）。
-  - `named_entity` 新增 `legacy` 欄位區分 legacy / non-legacy 實體。
-  - `match_named_entity()` 依 `in_attribute` 參數實現不同的匹配規則。
-  - `decode_character_references()` 新增 `in_attribute` 參數；數字參考無分號一律解碼。
-  - `entities.tsv` 載入時自動去重標記 legacy（同名實體出現兩次 → legacy=1）。
-
-- **Comment 狀態機邊緣情況** ✅
-  - `<!-->` 和 `<!--->` 等特殊 comment 開始序列的處理（WHATWG 有獨立的 comment-less-than-sign-bang 等狀態）。
-  - 完整實作 WHATWG §13.2.5 定義的 10 種 comment 相關狀態。
-
-- **Encoding sniffing（WHATWG §13.2.3）** ✅
-  - 完整編碼嗅探：BOM 偵測（UTF-8 / UTF-16 LE / BE）→ 傳輸層 hint → meta prescan（`<meta charset>` / `<meta http-equiv="Content-Type">`）→ 預設 UTF-8。
-  - 支援全部 39 種 WHATWG 標準編碼（~220 個標籤），使用 `bsearch()` 查找。
-  - 使用 glibc `iconv` 進行編碼轉換（`#ifdef HAVE_ICONV` 保護）。
-  - 內建 UTF-16 LE/BE → UTF-8 轉換器（含 surrogate pair 處理），無需 iconv。
-  - `replacement` 編碼直接回傳 U+FFFD；`x-user-defined` 0x80-0xFF → U+F780-U+F7FF。
-  - `parse_file_demo` 支援 `--charset` 選項傳入傳輸層 hint。
-  - 測試涵蓋 8 種場景：UTF-8 BOM、UTF-16 LE/BE、windows-1252（meta charset / http-equiv）、Shift_JIS、GBK、預設 UTF-8。
-
-- **Marker 站點補充（applet / marquee / object / template）** ⬜ 
-  - 目前 FMT_MARKER 僅在 `td`, `th`, `caption` 開啟時推入。
-  - WHATWG 規範要求 `applet`, `marquee`, `object` 開啟時也應推入 marker；`template` 推入時也需要隔離 active list。
-  - 這些元素在實際 HTML 中使用罕見，但影響到這些元素內部的格式化巢套。
-
-- **Foreign content（SVG / MathML）** ⬜
-  - 命名空間處理（namespace 切換進入 / 離開）
-  - Integration points（SVG 中的 foreignObject / title / desc）
-  - 外國內容中的特殊自閉合行為
-
-- **完整 parser error recovery** ⬜
-  - 所有 parse errors 對應的標準化容錯行為（WHATWG §13.2 各模式裡標記為 parse error 的分支）
-  - 目前大部分 error case 已隱式處理（如忽略不合法的開始標記），但沒有系統性驗證。
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| NULL 字元替換（U+0000 → U+FFFD） | ✅ | `tokenizer_replace_nulls()` |
+| CR/LF 正規化（CR → LF, CRLF → LF） | ⬜ | WHATWG §13.2.3.5 要求 |
+| Encoding sniffing | ✅ | 見下方「Encoding」章節 |
 
 ---
 
-## 開發建議（參考順序）
+## 二、Tree Construction（§13.2.6）
 
-1. **Node attrs 支持** → 這是最影響「這個 parser 有沒有用」的功能，做完後才能做 serialization。
-2. **AAA 補完（furthest block 路徑）** → 影響格式化巢套正確度。
-3. **Scoping elements + formatting elements 擴充** → 低成本，正確度提升明顯。
-4. **generate implied end tags 集中化** → 代碼整理，順便修潜在 bug。
-5. **HTML serialization** → 做完 attrs 後可獨立實現。
-6. 其餘 Low 項目按需求決定。
+### 2.1 Insertion Modes（共 23 種）
+
+| Mode | 狀態 | 備註 |
+|------|------|------|
+| initial | ✅ | |
+| before html | ✅ | |
+| before head | 🔧 | 合併至 `before html` / `in head` 處理 |
+| in head | ✅ | |
+| in head noscript | ⬜ | `<noscript>` 在 `<head>` 中時，腳本未啟用的特殊模式 |
+| after head | 🔧 | 合併至 `in head` → `in body` 的轉換邏輯 |
+| in body | ✅ | |
+| text | ⬜ | WHATWG 定義的 generic RCDATA/RAWTEXT 內容模式 |
+| in table | ✅ | |
+| in table text | ⬜ | 表格內文字的特殊收集模式 |
+| in caption | ✅ | |
+| in column group | 🔧 | `<colgroup>` / `<col>` 可解析但無獨立狀態 |
+| in table body | ✅ | |
+| in row | ✅ | |
+| in cell | ✅ | |
+| in select | ✅ | |
+| in select in table | ✅ | |
+| in template | ⬜ | `<template>` 的 Document Fragment 隔離 |
+| after body | ✅ | |
+| in frameset | ⬜ | `<frameset>` 模式，已淘汰 |
+| after frameset | ⬜ | |
+| after after body | ✅ | |
+| after after frameset | ⬜ | |
+
+**小結**：23 種模式中 13 種完整實作，3 種以合併方式實作（功能等效），7 種未實作。未實作的多為罕用（frameset × 3）或進階功能（template、in table text、in head noscript、text）。
+
+### 2.2 Tree Construction 演算法
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| Creating and inserting nodes | ✅ | |
+| Appropriate place for inserting a node | ✅ | 含 Foster Parenting |
+| Foster Parenting | ✅ | 表格模式下非表格內容 |
+| Element creation with attributes | ✅ | `attach_attrs()` |
+| Insert a character | ✅ | |
+| Insert a comment | ✅ | |
+| Generic raw text element parsing (§13.2.6.2) | 🔧 | Tokenizer 端處理，非獨立狀態 |
+| Generic RCDATA element parsing | 🔧 | Tokenizer 端處理 |
+| Reconstruct the active formatting elements | ✅ | |
+| Adoption Agency Algorithm (§13.2.6.4) | ✅ | 完整 outer/inner loop |
+| Close the cell | ✅ | |
+| Generate implied end tags | ✅ | `dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc` |
+| Generate all implied end tags thoroughly | ⬜ | 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr` |
+| Reset the insertion mode appropriately | ✅ | Fragment 解析用 |
+| Stop parsing (§13.2.6.5) | ⬜ | 目前遇到 EOF 直接停止，未執行完整清理步驟 |
+
+### 2.3 Formatting（活躍格式化元素）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| 14 種 Formatting Elements 支援 | ✅ | `a`, `b`, `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`, `strong`, `tt`, `u` |
+| Noah's Ark clause（同元素限制 3 筆） | ✅ | |
+| Marker 推入（`td` / `th` / `caption`） | ✅ | |
+| Marker 推入（`applet` / `marquee` / `object`） | ⬜ | |
+| Marker 推入（`template`） | ⬜ | |
+| Clear to marker | ✅ | |
+| Adoption Agency outer loop（8 次上限） | ✅ | |
+| Adoption Agency inner loop（8 次上限） | ✅ | |
+| Clone element（replacement） | ✅ | `clone_element_shallow()` |
+| Noah's Ark attribute 比對 | ⬜ | 目前只比對 tag name，WHATWG 要求還比對屬性 |
+
+### 2.4 Scope（範圍）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| General scope（9 個障壁元素） | ✅ | `applet`, `caption`, `html`, `table`, `td`, `th`, `marquee`, `object`, `template` |
+| List item scope（+`ol`, `ul`） | ✅ | |
+| Button scope（+`button`） | ✅ | |
+| Table scope（`html`, `table`, `template`） | ✅ | |
+| Select scope | ⬜ | 除 `optgroup` / `option` 外所有元素皆為障壁 |
+| SVG/MathML scope 元素 | ⬜ | Foreign content 的 scope 障壁 |
+
+### 2.5 Auto-close 邏輯
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<p>` 遇 block-like 開始標籤自動關閉 | ✅ | |
+| `<p>` end tag 不在 button scope → 隱式開啟再關閉 | ✅ | |
+| `<li>` 遇新 `<li>` 關閉 | ✅ | |
+| `<dt>` / `<dd>` 互斥關閉 | ✅ | |
+| `<option>` 遇新 `<option>` / `<optgroup>` 關閉 | ✅ | |
+| `<optgroup>` 遇新 `<optgroup>` 關閉 | ✅ | |
+| Table section（`thead/tbody/tfoot`）遇新 section 關閉 | ✅ | |
+| `<tr>` 遇新 `<tr>` 關閉 | ✅ | |
+| `<td>` / `<th>` 遇新 cell 關閉 | ✅ | |
+| `<h1>`-`<h6>` 遇同級標題關閉 | ⬜ | WHATWG: heading 遇到 heading 自動關閉 |
+| `<body>` end tag 的 implied end tags | ✅ | |
+
+### 2.6 Quirks Mode
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| DOCTYPE 判定（quirks / limited-quirks / no-quirks） | ✅ | 完整 public/system ID 匹配 |
+| Missing DOCTYPE → quirks | ✅ | |
+| Force quirks | ✅ | |
+| Quirks: `<table>` start 不關閉 `<p>` | ✅ | `dmode != DOC_QUIRKS` 條件 |
+| Limited-quirks: 僅影響 CSS 層 | ✅ | Parser 層行為等同 no-quirks |
+
+---
+
+## 三、Fragment Parsing（§13.2.6.6）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `build_fragment_from_input(input, context_tag)` API | ✅ | |
+| Context element 決定 tokenizer 狀態 | ✅ | |
+| Context element 決定 insertion mode | ✅ | |
+| Context element 不出現在輸出 | ✅ | |
+| `<html>` 作為 context：form element pointer 設定 | ⬜ | |
+| `<template>` 作為 context：template insertion modes stack | ⬜ | |
+| Context element 的 encoding 繼承 | ⬜ | |
+
+---
+
+## 四、Encoding Sniffing（§13.2.3）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| BOM 偵測（UTF-8 / UTF-16 LE / UTF-16 BE） | ✅ | |
+| Transport-layer hint（HTTP Content-Type 等） | ✅ | `--charset` CLI |
+| Prescan：`<meta charset="...">` | ✅ | |
+| Prescan：`<meta http-equiv="Content-Type" content="...;charset=...">` | ✅ | |
+| Prescan byte limit（前 1024 bytes） | ✅ | |
+| 39 種 WHATWG 標準編碼支援 | ✅ | |
+| ~220 個 label alias（bsearch 查找） | ✅ | |
+| UTF-16 → UTF-8 內建轉換（含 surrogate pair） | ✅ | |
+| iconv 轉換（其他編碼） | ✅ | |
+| `replacement` 編碼 → U+FFFD | ✅ | |
+| `x-user-defined` 轉換 | ✅ | |
+| Encoding confidence（certain / tentative / irrelevant） | ✅ | |
+| Re-encoding（meta 與 BOM 不符時的重新解碼） | ⬜ | 目前以第一個匹配結果為準 |
+| `ISO-2022-JP` encoder state machine | ⬜ | iconv 處理，未自行實作 |
+
+---
+
+## 五、Serialization（§16.3 Serializing HTML fragments）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `tree_serialize_html()` | ✅ | |
+| Void elements 不輸出 end tag | ✅ | 14 個 void elements |
+| Raw text（`script`/`style`）不 escape | ✅ | |
+| RCDATA（`textarea`/`title`）做 escape | ✅ | |
+| 文字節點 `&amp;`/`&lt;`/`&gt;` | ✅ | |
+| 屬性值 `&amp;`/`&quot;` | ✅ | |
+| Comment 序列化 `<!--...-->` | ✅ | |
+| DOCTYPE 序列化 | ✅ | |
+| `<template>` content 序列化 | ⬜ | 無 Document Fragment 隔離 |
+| Attribute 排序（規範未強制） | ⬜ | 保留解析順序 |
+| Boolean attributes | ✅ | 空字串值 |
+
+---
+
+## 六、特定元素處理
+
+### 6.1 `<head>` 相關
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<base>` / `<link>` / `<meta>` / `<style>` / `<title>` / `<script>` 在 head 中正確解析 | ✅ | |
+| `<noscript>` in head（scripting disabled） | ⬜ | |
+| `<head>` 重複出現 → 忽略 | ✅ | |
+
+### 6.2 `<body>` 相關
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<body>` 隱式建立 | ✅ | `ensure_body()` |
+| `<body>` 重複出現 → 合併屬性 | ⬜ | 目前忽略 |
+| `<html>` 重複出現 → 合併屬性 | ⬜ | 目前忽略 |
+| Block-like 元素自動關閉 `<p>` | ✅ | ~25 個 block-like 元素 |
+
+### 6.3 Table 相關
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<table>` / `<tbody>` / `<thead>` / `<tfoot>` / `<tr>` / `<td>` / `<th>` / `<caption>` | ✅ | |
+| `<colgroup>` / `<col>` 基本解析 | ✅ | |
+| Foster parenting（非表格內容） | ✅ | |
+| `<select>` in table → `in select in table` | ✅ | |
+| `<form>` in table 特殊處理 | ⬜ | |
+| In table text 收集模式 | ⬜ | 未在表格模式中緩衝文字 |
+
+### 6.4 Form 相關
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<form>` element pointer | ⬜ | WHATWG 維護的 "form element pointer" |
+| `<input>` / `<button>` / `<select>` / `<textarea>` 基本解析 | ✅ | |
+| `<input>` type=hidden 在 table 中的特殊處理 | ⬜ | |
+
+### 6.5 Scripting 相關
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<script>` 基本解析 | ✅ | |
+| `<script>` 執行 | ⬜ | N/A，純 Parser |
+| `document.write()` re-entrant parsing | ⬜ | N/A，純 Parser |
+| `<noscript>` 內容處理 | ⬜ | 需知道 scripting flag |
+
+### 6.6 Foreign Content（§13.2.6.7）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| SVG 命名空間進入 / 離開 | ⬜ | |
+| MathML 命名空間進入 / 離開 | ⬜ | |
+| SVG 元素名稱大小寫修正 | ⬜ | 如 `clippath` → `clipPath` |
+| SVG 屬性名稱大小寫修正 | ⬜ | 如 `viewbox` → `viewBox` |
+| MathML 屬性名稱修正 | ⬜ | |
+| Integration points（`foreignObject` / `desc` / `title`） | ⬜ | |
+| 外國元素自閉合行為 | ⬜ | |
+| CDATA 區段（`<![CDATA[...]]>`） | ⬜ | |
+| `<font>` with color/face/size 屬性 → 中斷外國內容 | ⬜ | |
+
+### 6.7 `<template>`
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| `<template>` 基本解析 | ✅ | 作為普通元素 |
+| Template contents（Document Fragment） | ⬜ | |
+| Template insertion modes stack | ⬜ | |
+| `</template>` 正確 pop | ⬜ | |
+
+---
+
+## 七、完整 Parse Error 列表
+
+WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error 大多已報告，tree construction 階段的 error 多為隱式處理（忽略 / 容錯）。
+
+| 類別 | 已報告 | 未報告 | 備註 |
+|------|--------|--------|------|
+| Tokenizer parse errors（~25 種） | ~20 | ~5 | `eof-in-*`, `unexpected-*` 等 |
+| Tree construction parse errors（~55 種） | ~5 | ~50 | 大多直接忽略或隱式容錯 |
+
+---
+
+## 八、進階功能（非 Parser 核心）
+
+| 功能 | 狀態 | 備註 |
+|------|------|------|
+| DOM API（`getElementById` 等） | ⬜ | 超出 Parser 範疇 |
+| CSS Parser | ⬜ | 超出範疇 |
+| JavaScript Engine | ⬜ | 超出範疇 |
+| Rendering / Layout | ⬜ | 超出範疇 |
+| HTTP / Networking | ⬜ | 超出範疇 |
+
+---
+
+## 總結
+
+### 完成度統計
+
+| 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
+|------|--------|---------|--------|--------|
+| Tokenizer 狀態（80） | ~48 | ~16 | ~3 | ~80% |
+| Character References | 5/7 | 0 | 2 | 71% |
+| Insertion Modes（23） | 13 | 3 | 7 | ~70% |
+| Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
+| Formatting / AFE | 8/10 | 0 | 2 | 80% |
+| Scope | 4/6 | 0 | 2 | 67% |
+| Auto-close | 10/11 | 0 | 1 | 91% |
+| Fragment Parsing | 4/7 | 0 | 3 | 57% |
+| Encoding Sniffing | 12/14 | 0 | 2 | 86% |
+| Serialization | 9/11 | 0 | 2 | 82% |
+| Foreign Content | 0/9 | 0 | 9 | 0% |
+| Template | 1/4 | 0 | 3 | 25% |
+
+### 整體評估
+
+- **核心 HTML 解析（無 SVG/MathML）**：~85% 完成。能正確解析絕大多數真實世界的 HTML 文件。
+- **含 Foreign Content**：~70% 完成。SVG/MathML 是最大缺口。
+- **完全符合 WHATWG 規範（含所有邊緣情況）**：~65% 完成。
+
+### 優先建議（按影響度排序）
+
+1. **Foreign Content（SVG / MathML）** — 影響度最大的剩餘缺口，現代網頁大量使用 SVG
+2. **`<template>` Document Fragment** — 現代前端框架廣泛使用
+3. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正
+4. **Marker 補充（`applet` / `marquee` / `object`）** — 低成本修正
+5. **CR/LF 正規化** — 輸入前處理
+6. **Numeric reference 範圍修正表** — 精確度提升
+7. **Noah's Ark attribute 比對** — 精確度提升
+8. **`in table text` 模式** — 表格內文字的精確處理
+9. **`<form>` element pointer** — 表單相關場景
+10. **完整 parse error 報告** — 系統性驗證
