@@ -1,7 +1,7 @@
 CC ?= cc
-CFLAGS ?= -std=c11 -Wall -Wextra -O2 -g
+CFLAGS ?= -std=c11 -Wall -Wextra -O2 -g -DHAVE_ICONV
 
-SRC = src/token.c src/tokenizer.c src/tree.c src/tree_builder.c
+SRC = src/token.c src/tokenizer.c src/tree.c src/tree_builder.c src/encoding.c
 
 all: parse_html
 
@@ -61,7 +61,25 @@ test-serialize: serialize_demo
 	@echo "=== Serialization: rcdata_rawtext_script.html ==="
 	@./serialize_demo tests/rcdata_rawtext_script.html
 
-test-all: test-html test-fragment
+test-encoding: parse_html
+	@echo "=== Encoding: UTF-8 BOM ==="
+	./parse_html tests/encoding_utf8_bom.html
+	@echo "=== Encoding: UTF-16 LE BOM ==="
+	./parse_html tests/encoding_utf16le_bom.html
+	@echo "=== Encoding: UTF-16 BE BOM ==="
+	./parse_html tests/encoding_utf16be_bom.html
+	@echo "=== Encoding: meta charset (windows-1252) ==="
+	./parse_html tests/encoding_meta_charset.html
+	@echo "=== Encoding: meta http-equiv (windows-1252) ==="
+	./parse_html tests/encoding_meta_httpequiv.html
+	@echo "=== Encoding: Shift_JIS ==="
+	./parse_html tests/encoding_shift_jis.html
+	@echo "=== Encoding: GBK ==="
+	./parse_html tests/encoding_gbk.html
+	@echo "=== Encoding: default UTF-8 ==="
+	./parse_html tests/encoding_default_utf8.html
+
+test-all: test-html test-fragment test-encoding
 
 clean:
 	rm -f parse_html parse_fragment_demo serialize_demo

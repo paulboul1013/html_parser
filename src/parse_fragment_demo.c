@@ -3,6 +3,7 @@
 
 #include "tree_builder.h"
 #include "tokenizer.h"
+#include "encoding.h"
 
 static char *read_file(const char *path) {
     FILE *fp = fopen(path, "rb");
@@ -25,9 +26,14 @@ static char *read_file(const char *path) {
     }
     read_len = fread(raw, 1, (size_t)len, fp);
     fclose(fp);
-    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
-    buf = tokenizer_replace_nulls(raw, read_len);
+    /* Encoding sniffing and conversion to UTF-8 */
+    encoding_result enc = encoding_sniff_and_convert(
+        (const unsigned char *)raw, read_len, NULL);
     free(raw);
+    if (!enc.data) return NULL;
+    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
+    buf = tokenizer_replace_nulls(enc.data, enc.len);
+    free(enc.data);
     return buf;
 }
 

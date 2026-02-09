@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "tree_builder.h"
 #include "tokenizer.h"
+#include "encoding.h"
 
-static char *read_file(const char *path) {
+static char *read_file(const char *path, const char *charset_hint) {
     FILE *fp = fopen(path, "rb");
     long len;
     size_t read_len;
@@ -25,15 +27,27 @@ static char *read_file(const char *path) {
     }
     read_len = fread(raw, 1, (size_t)len, fp);
     fclose(fp);
-    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
-    buf = tokenizer_replace_nulls(raw, read_len);
+    /* Encoding sniffing and conversion to UTF-8 */
+    encoding_result enc = encoding_sniff_and_convert(
+        (const unsigned char *)raw, read_len, charset_hint);
     free(raw);
+    if (!enc.data) return NULL;
+    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
+    buf = tokenizer_replace_nulls(enc.data, enc.len);
+    free(enc.data);
     return buf;
 }
 
 int main(int argc, char **argv) {
-    const char *path = (argc > 1) ? argv[1] : "tests/sample.html";
-    char *input = read_file(path);
+    const char *charset_hint = NULL;
+    int arg_idx = 1;
+    /* Parse --charset option */
+    if (argc > 2 && strcmp(argv[1], "--charset") == 0) {
+        charset_hint = argv[2];
+        arg_idx = 3;
+    }
+    const char *path = (argc > arg_idx) ? argv[arg_idx] : "tests/sample.html";
+    char *input = read_file(path, charset_hint);
     if (!input) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;

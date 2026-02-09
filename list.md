@@ -125,12 +125,16 @@
   - `<!-->` 和 `<!--->` 等特殊 comment 開始序列的處理（WHATWG 有獨立的 comment-less-than-sign-bang 等狀態）。
   - 完整實作 WHATWG §13.2.5 定義的 10 種 comment 相關狀態。
 
-- **Encoding sniffing** ⬜
-  - 目前假設輸入為 UTF-8。
-  - 完整相容需要：BOM 檢測（UTF-8 / UTF-16 LE / BE）、`<meta charset>` 或 `<meta http-equiv="Content-Type">` 提前掃描、HTTP header 的 Content-Type 傳入。
-  - 對於 CLI 工具而言優先度很低，但若要成為嵌入式 parser 則必須處理。
+- **Encoding sniffing（WHATWG §13.2.3）** ✅
+  - 完整編碼嗅探：BOM 偵測（UTF-8 / UTF-16 LE / BE）→ 傳輸層 hint → meta prescan（`<meta charset>` / `<meta http-equiv="Content-Type">`）→ 預設 UTF-8。
+  - 支援全部 39 種 WHATWG 標準編碼（~220 個標籤），使用 `bsearch()` 查找。
+  - 使用 glibc `iconv` 進行編碼轉換（`#ifdef HAVE_ICONV` 保護）。
+  - 內建 UTF-16 LE/BE → UTF-8 轉換器（含 surrogate pair 處理），無需 iconv。
+  - `replacement` 編碼直接回傳 U+FFFD；`x-user-defined` 0x80-0xFF → U+F780-U+F7FF。
+  - `parse_file_demo` 支援 `--charset` 選項傳入傳輸層 hint。
+  - 測試涵蓋 8 種場景：UTF-8 BOM、UTF-16 LE/BE、windows-1252（meta charset / http-equiv）、Shift_JIS、GBK、預設 UTF-8。
 
-- **Marker 站點補充（applet / marquee / object / template）** ⬜
+- **Marker 站點補充（applet / marquee / object / template）** ⬜ 
   - 目前 FMT_MARKER 僅在 `td`, `th`, `caption` 開啟時推入。
   - WHATWG 規範要求 `applet`, `marquee`, `object` 開啟時也應推入 marker；`template` 推入時也需要隔離 active list。
   - 這些元素在實際 HTML 中使用罕見，但影響到這些元素內部的格式化巢套。
