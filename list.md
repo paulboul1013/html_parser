@@ -59,9 +59,9 @@
 | DOCTYPE system identifier (single-quoted) state | ✅ | |
 | After DOCTYPE system identifier state | ✅ | |
 | Bogus DOCTYPE state | ✅ | |
-| CDATA section state | ⬜ | 僅 Foreign Content 需要，HTML 中為 parse error |
-| CDATA section bracket state | ⬜ | |
-| CDATA section end state | ⬜ | |
+| CDATA section state | ✅ | Foreign Content 中啟用，`allow_cdata` flag |
+| CDATA section bracket state | ✅ | |
+| CDATA section end state | ✅ | |
 | Character reference state | ✅ | |
 | Named character reference state | ✅ | |
 | Ambiguous ampersand state | ✅ | |
@@ -206,7 +206,7 @@
 | Button scope（+`button`） | ✅ | |
 | Table scope（`html`, `table`, `template`） | ✅ | |
 | Select scope | ⬜ | 除 `optgroup` / `option` 外所有元素皆為障壁 |
-| SVG/MathML scope 元素 | ⬜ | Foreign content 的 scope 障壁 |
+| SVG/MathML scope 元素 | ✅ | `is_scoping_element_ns()` 命名空間感知 |
 
 ### 2.5 Auto-close 邏輯
 
@@ -340,15 +340,15 @@
 
 | 功能 | 狀態 | 備註 |
 |------|------|------|
-| SVG 命名空間進入 / 離開 | ⬜ | |
-| MathML 命名空間進入 / 離開 | ⬜ | |
-| SVG 元素名稱大小寫修正 | ⬜ | 如 `clippath` → `clipPath` |
-| SVG 屬性名稱大小寫修正 | ⬜ | 如 `viewbox` → `viewBox` |
-| MathML 屬性名稱修正 | ⬜ | |
-| Integration points（`foreignObject` / `desc` / `title`） | ⬜ | |
-| 外國元素自閉合行為 | ⬜ | |
-| CDATA 區段（`<![CDATA[...]]>`） | ⬜ | |
-| `<font>` with color/face/size 屬性 → 中斷外國內容 | ⬜ | |
+| SVG 命名空間進入 / 離開 | ✅ | `<svg>` start tag → NS_SVG，breakout → 回 HTML |
+| MathML 命名空間進入 / 離開 | ✅ | `<math>` start tag → NS_MATHML |
+| SVG 元素名稱大小寫修正 | ✅ | 37 條，如 `clippath` → `clipPath` |
+| SVG 屬性名稱大小寫修正 | ✅ | 57 條，如 `viewbox` → `viewBox` |
+| MathML 屬性名稱修正 | ✅ | `definitionurl` → `definitionURL` |
+| Integration points（`foreignObject` / `desc` / `title`） | ✅ | HTML + MathML text integration points |
+| 外國元素自閉合行為 | ✅ | `self_closing` → 不 push stack |
+| CDATA 區段（`<![CDATA[...]]>`） | ✅ | tokenizer `allow_cdata` flag |
+| `<font>` with color/face/size 屬性 → 中斷外國內容 | ✅ | `font_has_breakout_attr()` |
 
 ### 6.7 `<template>`
 
@@ -400,20 +400,18 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 | Fragment Parsing | 4/7 | 0 | 3 | 57% |
 | Encoding Sniffing | 12/14 | 0 | 2 | 86% |
 | Serialization | 9/11 | 0 | 2 | 82% |
-| Foreign Content | 0/9 | 0 | 9 | 0% |
+| Foreign Content | 9/9 | 0 | 0 | 100% |
 | Template | 1/4 | 0 | 3 | 25% |
 
 ### 整體評估
 
-- **核心 HTML 解析（無 SVG/MathML）**：~85% 完成。能正確解析絕大多數真實世界的 HTML 文件。
-- **含 Foreign Content**：~70% 完成。SVG/MathML 是最大缺口。
-- **完全符合 WHATWG 規範（含所有邊緣情況）**：~65% 完成。
+- **核心 HTML 解析（含 SVG/MathML）**：~90% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。
+- **完全符合 WHATWG 規範（含所有邊緣情況）**：~75% 完成。
 
 ### 優先建議（按影響度排序）
 
-1. **Foreign Content（SVG / MathML）** — 影響度最大的剩餘缺口，現代網頁大量使用 SVG
-2. **`<template>` Document Fragment** — 現代前端框架廣泛使用
-3. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正
+1. **`<template>` Document Fragment** — 現代前端框架廣泛使用
+2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正
 4. **Marker 補充（`applet` / `marquee` / `object`）** — 低成本修正
 5. **CR/LF 正規化** — 輸入前處理
 6. **Numeric reference 範圍修正表** — 精確度提升

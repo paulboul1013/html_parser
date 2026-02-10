@@ -33,6 +33,12 @@ node *node_create(node_type type, const char *name, const char *data) {
     return n;
 }
 
+node *node_create_ns(node_type type, const char *name, const char *data, node_namespace ns) {
+    node *n = node_create(type, name, data);
+    if (n) n->ns = ns;
+    return n;
+}
+
 void node_append_child(node *parent, node *child) {
     if (!parent || !child) return;
     child->parent = parent;
@@ -148,6 +154,8 @@ static void dump_node(const node *n, const char *prefix, int is_last) {
     const char *branch = is_last ? "\\-- " : "|-- ";
 
     printf("%s%s%s", prefix, branch, node_type_name(n->type));
+    if (n->ns == NS_SVG) printf("(svg)");
+    else if (n->ns == NS_MATHML) printf("(math)");
     if (n->name) printf(" name=\"%s\"", n->name);
     if (n->data) printf(" data=\"%s\"", n->data);
     if (n->attr_count > 0) {
@@ -351,7 +359,15 @@ static void serialize_node(const node *n, string_buffer *sb, const char *parent_
             }
 
             /* Closing tag (skip for void elements) */
-            if (!is_void_element_serializer(n->name)) {
+            if (n->ns != NS_HTML && !n->first_child) {
+                /* Foreign element with no children: self-closing already emitted as <tag ...> */
+                /* Rewrite: replace trailing '>' with ' />' */
+                if (sb->len > 0 && sb->data[sb->len - 1] == '>') {
+                    sb->len--;
+                    sb->data[sb->len] = '\0';
+                    sb_append(sb, " />");
+                }
+            } else if (!is_void_element_serializer(n->name)) {
                 sb_append(sb, "</");
                 sb_append(sb, n->name ? n->name : "");
                 sb_append(sb, ">");

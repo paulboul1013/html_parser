@@ -21,6 +21,7 @@ typedef struct {
     size_t col;
     tokenizer_state state;
     char raw_tag[16];
+    int allow_cdata;        /* set by tree builder when in foreign content */
 } tokenizer;
 
 void tokenizer_init(tokenizer *tz, const char *input);

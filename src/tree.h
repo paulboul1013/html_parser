@@ -11,6 +11,12 @@ typedef enum {
     NODE_COMMENT
 } node_type;
 
+typedef enum {
+    NS_HTML = 0,    /* default — calloc zero-init means HTML */
+    NS_SVG,
+    NS_MATHML
+} node_namespace;
+
 typedef struct {
     char *name;
     char *value;
@@ -18,6 +24,7 @@ typedef struct {
 
 typedef struct node {
     node_type type;
+    node_namespace ns;       /* element namespace (NS_HTML for most elements) */
     char *name;              /* element/doctype name */
     char *data;              /* text/comment data */
     node_attr *attrs;        /* element attributes (NULL if none) */
@@ -29,6 +36,7 @@ typedef struct node {
 } node;
 
 node *node_create(node_type type, const char *name, const char *data);
+node *node_create_ns(node_type type, const char *name, const char *data, node_namespace ns);
 void node_append_child(node *parent, node *child);
 void node_insert_before(node *parent, node *child, node *ref);
 void node_remove_child(node *parent, node *child);

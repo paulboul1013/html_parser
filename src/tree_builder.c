@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tree_builder.h"
 #include "tokenizer.h"
+#include "foreign.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,19 @@ static void attach_attrs(node *n, const token_attr *src, size_t count) {
     n->attr_count = count;
     for (size_t i = 0; i < count; ++i) {
         n->attrs[i].name  = src[i].name  ? strdup(src[i].name)  : NULL;
+        n->attrs[i].value = src[i].value ? strdup(src[i].value) : NULL;
+    }
+}
+
+/* Attach attributes with SVG attribute name adjustment */
+static void attach_attrs_svg(node *n, const token_attr *src, size_t count) {
+    if (!n || !src || count == 0) return;
+    n->attrs = (node_attr *)malloc(count * sizeof(node_attr));
+    if (!n->attrs) return;
+    n->attr_count = count;
+    for (size_t i = 0; i < count; ++i) {
+        const char *aname = src[i].name ? svg_adjust_attr_name(src[i].name) : NULL;
+        n->attrs[i].name  = aname ? strdup(aname) : NULL;
         n->attrs[i].value = src[i].value ? strdup(src[i].value) : NULL;
     }
 }
@@ -230,8 +244,8 @@ static int has_element_in_scope(node_stack *st, const char *name) {
     for (size_t i = st->size; i > 0; --i) {
         node *n = st->items[i - 1];
         if (!n || !n->name) continue;
-        if (strcmp(n->name, name) == 0) return 1;
-        if (is_scoping_element(n->name)) return 0;
+        if (n->ns == NS_HTML && strcmp(n->name, name) == 0) return 1;
+        if (is_scoping_element_ns(n->name, n->ns)) return 0;
     }
     return 0;
 }
@@ -241,7 +255,8 @@ static int has_element_in_list_item_scope(node_stack *st, const char *name) {
     for (size_t i = st->size; i > 0; --i) {
         node *n = st->items[i - 1];
         if (!n || !n->name) continue;
-        if (strcmp(n->name, name) == 0) return 1;
+        if (n->ns == NS_HTML && strcmp(n->name, name) == 0) return 1;
+        if (n->ns != NS_HTML && is_scoping_element_ns(n->name, n->ns)) return 0;
         if (is_list_item_scoping_element(n->name)) return 0;
     }
     return 0;
@@ -252,7 +267,8 @@ static int has_element_in_button_scope(node_stack *st, const char *name) {
     for (size_t i = st->size; i > 0; --i) {
         node *n = st->items[i - 1];
         if (!n || !n->name) continue;
-        if (strcmp(n->name, name) == 0) return 1;
+        if (n->ns == NS_HTML && strcmp(n->name, name) == 0) return 1;
+        if (n->ns != NS_HTML && is_scoping_element_ns(n->name, n->ns)) return 0;
         if (is_button_scoping_element(n->name)) return 0;
     }
     return 0;
@@ -263,7 +279,8 @@ static int has_element_in_table_scope(node_stack *st, const char *name) {
     for (size_t i = st->size; i > 0; --i) {
         node *n = st->items[i - 1];
         if (!n || !n->name) continue;
-        if (strcmp(n->name, name) == 0) return 1;
+        if (n->ns == NS_HTML && strcmp(n->name, name) == 0) return 1;
+        if (n->ns != NS_HTML && is_scoping_element_ns(n->name, n->ns)) return 0;
         if (is_table_scoping_element(n->name)) return 0;
     }
     return 0;
@@ -422,7 +439,6 @@ static void reconstruct_active_formatting(node_stack *st, formatting_list *fl, n
     }
 }
 
-static int is_special_element(const char *name);
 static node *clone_element_shallow(node *original);
 static int is_foster_parent_target(const char *name);
 static void foster_insert(node_stack *st, node *doc, node *child);
@@ -470,7 +486,7 @@ static int adoption_agency(node_stack *st, formatting_list *fl, node *doc,
         int fb_stack_idx = -1;
         for (size_t i = (size_t)fe_stack_idx + 1; i < st->size; ++i) {
             if (st->items[i] && st->items[i]->name &&
-                is_special_element(st->items[i]->name)) {
+                is_special_element_ns(st->items[i]->name, st->items[i]->ns)) {
                 furthest_block = st->items[i];
                 fb_stack_idx = (int)i;
                 break;
@@ -729,6 +745,23 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
         *mode = MODE_IN_SELECT;
         return;
     }
+    /* SVG / MathML enter foreign content */
+    if (name && strcmp(name, "svg") == 0) {
+        reconstruct_active_formatting(st, fmt, current_node(st, doc));
+        node *n = node_create_ns(NODE_ELEMENT, "svg", NULL, NS_SVG);
+        attach_attrs_svg(n, attrs, attr_count);
+        node_append_child(current_node(st, doc), n);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
+    if (name && strcmp(name, "math") == 0) {
+        reconstruct_active_formatting(st, fmt, current_node(st, doc));
+        node *n = node_create_ns(NODE_ELEMENT, "math", NULL, NS_MATHML);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(current_node(st, doc), n);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
     fmt_tag ft = fmt_tag_from_name(name);
     if (ft != FMT_NONE) {
         node *parent = current_node(st, doc);
@@ -809,92 +842,11 @@ static int is_void_element(const char *name) {
            strcmp(name, "wbr") == 0;
 }
 
-/* WHATWG §13.2.6.1 — special elements (HTML namespace) */
-static int is_special_element(const char *name) {
-    if (!name) return 0;
-    return strcmp(name, "address") == 0 ||
-           strcmp(name, "applet") == 0 ||
-           strcmp(name, "area") == 0 ||
-           strcmp(name, "article") == 0 ||
-           strcmp(name, "aside") == 0 ||
-           strcmp(name, "base") == 0 ||
-           strcmp(name, "basefont") == 0 ||
-           strcmp(name, "blockquote") == 0 ||
-           strcmp(name, "body") == 0 ||
-           strcmp(name, "br") == 0 ||
-           strcmp(name, "button") == 0 ||
-           strcmp(name, "caption") == 0 ||
-           strcmp(name, "center") == 0 ||
-           strcmp(name, "col") == 0 ||
-           strcmp(name, "colgroup") == 0 ||
-           strcmp(name, "dd") == 0 ||
-           strcmp(name, "details") == 0 ||
-           strcmp(name, "dir") == 0 ||
-           strcmp(name, "div") == 0 ||
-           strcmp(name, "dl") == 0 ||
-           strcmp(name, "dt") == 0 ||
-           strcmp(name, "embed") == 0 ||
-           strcmp(name, "fieldset") == 0 ||
-           strcmp(name, "figcaption") == 0 ||
-           strcmp(name, "figure") == 0 ||
-           strcmp(name, "footer") == 0 ||
-           strcmp(name, "form") == 0 ||
-           strcmp(name, "frame") == 0 ||
-           strcmp(name, "frameset") == 0 ||
-           strcmp(name, "h1") == 0 || strcmp(name, "h2") == 0 ||
-           strcmp(name, "h3") == 0 || strcmp(name, "h4") == 0 ||
-           strcmp(name, "h5") == 0 || strcmp(name, "h6") == 0 ||
-           strcmp(name, "head") == 0 ||
-           strcmp(name, "header") == 0 ||
-           strcmp(name, "hgroup") == 0 ||
-           strcmp(name, "hr") == 0 ||
-           strcmp(name, "html") == 0 ||
-           strcmp(name, "iframe") == 0 ||
-           strcmp(name, "img") == 0 ||
-           strcmp(name, "input") == 0 ||
-           strcmp(name, "li") == 0 ||
-           strcmp(name, "link") == 0 ||
-           strcmp(name, "listing") == 0 ||
-           strcmp(name, "main") == 0 ||
-           strcmp(name, "marquee") == 0 ||
-           strcmp(name, "menu") == 0 ||
-           strcmp(name, "meta") == 0 ||
-           strcmp(name, "nav") == 0 ||
-           strcmp(name, "noembed") == 0 ||
-           strcmp(name, "noframes") == 0 ||
-           strcmp(name, "noscript") == 0 ||
-           strcmp(name, "object") == 0 ||
-           strcmp(name, "ol") == 0 ||
-           strcmp(name, "p") == 0 ||
-           strcmp(name, "param") == 0 ||
-           strcmp(name, "plaintext") == 0 ||
-           strcmp(name, "pre") == 0 ||
-           strcmp(name, "script") == 0 ||
-           strcmp(name, "section") == 0 ||
-           strcmp(name, "select") == 0 ||
-           strcmp(name, "source") == 0 ||
-           strcmp(name, "style") == 0 ||
-           strcmp(name, "summary") == 0 ||
-           strcmp(name, "table") == 0 ||
-           strcmp(name, "tbody") == 0 ||
-           strcmp(name, "td") == 0 ||
-           strcmp(name, "template") == 0 ||
-           strcmp(name, "textarea") == 0 ||
-           strcmp(name, "tfoot") == 0 ||
-           strcmp(name, "th") == 0 ||
-           strcmp(name, "thead") == 0 ||
-           strcmp(name, "title") == 0 ||
-           strcmp(name, "tr") == 0 ||
-           strcmp(name, "track") == 0 ||
-           strcmp(name, "ul") == 0 ||
-           strcmp(name, "wbr") == 0 ||
-           strcmp(name, "xmp") == 0;
-}
-
 static node *clone_element_shallow(node *original) {
     if (!original) return NULL;
     node *n = node_create(NODE_ELEMENT, original->name, NULL);
     if (!n) return NULL;
+    n->ns = original->ns;
     if (original->attrs && original->attr_count > 0) {
         n->attrs = (node_attr *)malloc(original->attr_count * sizeof(node_attr));
         if (n->attrs) {
@@ -1173,6 +1125,25 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         *mode = MODE_IN_TABLE;
         return;
     }
+    /* SVG / MathML enter foreign content */
+    if (name && strcmp(name, "svg") == 0) {
+        reconstruct_active_formatting(st, fmt, current_node(st, doc));
+        ensure_body(doc, st, html, body);
+        node *n = node_create_ns(NODE_ELEMENT, "svg", NULL, NS_SVG);
+        attach_attrs_svg(n, attrs, attr_count);
+        node_append_child(current_node(st, doc), n);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
+    if (name && strcmp(name, "math") == 0) {
+        reconstruct_active_formatting(st, fmt, current_node(st, doc));
+        ensure_body(doc, st, html, body);
+        node *n = node_create_ns(NODE_ELEMENT, "math", NULL, NS_MATHML);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(current_node(st, doc), n);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
     body_autoclose_on_start(st, name, dmode);
     ensure_body(doc, st, html, body);
     node *parent = current_node(st, doc);
@@ -1237,6 +1208,164 @@ static void close_head(node_stack *st, node **head_out, insertion_mode *mode) {
     *mode = MODE_IN_BODY;
 }
 
+/* ============================================================================
+ * Foreign Content processing (WHATWG §13.2.6.7)
+ * Returns 1 if the token was consumed in foreign mode.
+ * Returns 0 if normal HTML mode should handle the token.
+ * Sets *reprocess_flag = 1 if the token should be reprocessed after breakout.
+ * ============================================================================ */
+static int process_in_foreign_content(
+    token_type type, const char *name, const char *data,
+    int self_closing, const token_attr *attrs, size_t attr_count,
+    node_stack *st, formatting_list *fl, node *doc,
+    insertion_mode *mode, int *reprocess_flag,
+    node *fragment_context)
+{
+    (void)fl; (void)mode; (void)fragment_context;
+
+    /* Get adjusted current node */
+    node *acn = stack_top(st);
+    if (!acn) return 0;
+    if (acn->ns == NS_HTML) return 0;
+
+    /* MathML text integration point: start tag that is not mglyph/malignmark
+       → process in HTML mode */
+    if (acn->ns == NS_MATHML && is_mathml_text_integration_point(acn->name)) {
+        if (type == TOKEN_START_TAG && name &&
+            strcmp(name, "mglyph") != 0 && strcmp(name, "malignmark") != 0 &&
+            strcmp(name, "svg") != 0 && strcmp(name, "math") != 0) {
+            return 0; /* let HTML mode handle */
+        }
+        if (type == TOKEN_CHARACTER) {
+            return 0; /* let HTML mode handle */
+        }
+    }
+
+    /* HTML integration point: start tag or character → HTML mode */
+    if (is_html_integration_point(acn->name, acn->ns, acn->attrs, acn->attr_count)) {
+        if (type == TOKEN_START_TAG || type == TOKEN_CHARACTER) {
+            return 0; /* let HTML mode handle */
+        }
+    }
+
+    switch (type) {
+        case TOKEN_CHARACTER: {
+            /* Insert text node into current node */
+            if (data && data[0] != '\0') {
+                node *text = node_create(NODE_TEXT, NULL, data);
+                node_append_child(current_node(st, doc), text);
+            }
+            return 1;
+        }
+
+        case TOKEN_COMMENT: {
+            node *comment = node_create(NODE_COMMENT, NULL, data ? data : "");
+            node_append_child(current_node(st, doc), comment);
+            return 1;
+        }
+
+        case TOKEN_START_TAG: {
+            /* Breakout: HTML tag inside foreign content */
+            if (is_foreign_breakout_tag(name) ||
+                (name && strcmp(name, "font") == 0 && font_has_breakout_attr(attrs, attr_count))) {
+                /* Pop from stack until we reach an HTML element or an
+                   integration point */
+                while (st->size > 0) {
+                    node *top = stack_top(st);
+                    if (!top) break;
+                    if (top->ns == NS_HTML) break;
+                    if (is_mathml_text_integration_point(top->name) && top->ns == NS_MATHML) break;
+                    if (is_html_integration_point(top->name, top->ns, top->attrs, top->attr_count)) break;
+                    stack_pop(st);
+                }
+                *reprocess_flag = 1;
+                return 1;
+            }
+
+            /* Stay in foreign content: create element in current namespace */
+            node_namespace target_ns = acn->ns;
+            const char *adjusted_name = name;
+            if (target_ns == NS_SVG) {
+                adjusted_name = svg_adjust_element_name(name);
+            }
+
+            node *n = node_create_ns(NODE_ELEMENT, adjusted_name, NULL, target_ns);
+            if (!n) return 1;
+
+            /* Adjust attribute names */
+            if (attr_count > 0 && attrs) {
+                n->attrs = (node_attr *)malloc(attr_count * sizeof(node_attr));
+                if (n->attrs) {
+                    n->attr_count = attr_count;
+                    for (size_t i = 0; i < attr_count; ++i) {
+                        const char *aname = attrs[i].name;
+                        if (target_ns == NS_SVG && aname) {
+                            aname = svg_adjust_attr_name(aname);
+                        } else if (target_ns == NS_MATHML && aname) {
+                            aname = mathml_adjust_attr_name(aname);
+                        }
+                        n->attrs[i].name  = aname ? strdup(aname) : NULL;
+                        n->attrs[i].value = attrs[i].value ? strdup(attrs[i].value) : NULL;
+                    }
+                }
+            }
+
+            node_append_child(current_node(st, doc), n);
+            if (!self_closing) {
+                stack_push(st, n);
+            }
+            return 1;
+        }
+
+        case TOKEN_END_TAG: {
+            if (!name) return 1;
+            /* Walk stack from top downward looking for matching element */
+            for (size_t i = st->size; i > 0; --i) {
+                node *entry = st->items[i - 1];
+                if (!entry || !entry->name) continue;
+
+                /* Case-insensitive match for SVG adjusted names */
+                const char *entry_name = entry->name;
+                int match = 0;
+                if (entry->ns == NS_SVG) {
+                    /* Compare lowercased versions */
+                    size_t nlen = strlen(name);
+                    size_t elen = strlen(entry_name);
+                    if (nlen == elen) {
+                        match = 1;
+                        for (size_t j = 0; j < nlen; ++j) {
+                            char a = name[j];
+                            char b = entry_name[j];
+                            if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+                            if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                            if (a != b) { match = 0; break; }
+                        }
+                    }
+                } else {
+                    match = (strcmp(entry_name, name) == 0);
+                }
+
+                if (match) {
+                    /* Pop up to and including this element */
+                    while (st->size >= i) {
+                        stack_pop(st);
+                    }
+                    return 1;
+                }
+
+                /* If we hit an HTML element, hand off to normal processing */
+                if (entry->ns == NS_HTML) {
+                    return 0;
+                }
+            }
+            return 1;
+        }
+
+        default:
+            return 0;
+    }
+}
+
 node *build_tree_from_tokens(const token *tokens, size_t count) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
@@ -1260,6 +1389,20 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
         while (reprocess) {
             reprocess = 0;
             parent = current_node(&st, doc);
+
+            /* Foreign content check */
+            {
+                node *acn = (st.size > 0) ? stack_top(&st) : NULL;
+                if (acn && acn->ns != NS_HTML) {
+                    int fc_reprocess = 0;
+                    if (process_in_foreign_content(t->type, t->name, t->data,
+                            t->self_closing, t->attrs, t->attr_count,
+                            &st, &fmt, doc, &mode, &fc_reprocess, NULL)) {
+                        if (fc_reprocess) { reprocess = 1; }
+                        continue;
+                    }
+                }
+            }
 
             switch (t->type) {
                 case TOKEN_DOCTYPE:
@@ -1781,6 +1924,11 @@ node *build_tree_from_input(const char *input) {
 
     while (1) {
         token_init(&t);
+        /* Set CDATA flag based on whether current node is in foreign content */
+        {
+            node *top = stack_top(&st);
+            tz.allow_cdata = (top && top->ns != NS_HTML) ? 1 : 0;
+        }
         tokenizer_next(&tz, &t);
 
         node *parent;
@@ -1790,6 +1938,29 @@ node *build_tree_from_input(const char *input) {
         while (reprocess) {
             reprocess = 0;
             parent = current_node(&st, doc);
+
+            /* Foreign content check */
+            {
+                node *acn = (st.size > 0) ? stack_top(&st) : NULL;
+                if (acn && acn->ns != NS_HTML) {
+                    int fc_reprocess = 0;
+                    if (process_in_foreign_content(t.type, t.name, t.data,
+                            t.self_closing, t.attrs, t.attr_count,
+                            &st, &fmt, doc, &mode, &fc_reprocess, NULL)) {
+                        /* Reset tokenizer if SVG <title> was handled in foreign
+                           content — the tokenizer already switched to RCDATA
+                           but SVG title is an HTML integration point, not RCDATA. */
+                        if (t.type == TOKEN_START_TAG && t.name &&
+                            acn->ns == NS_SVG && strcmp(t.name, "title") == 0 &&
+                            !fc_reprocess) {
+                            tz.state = TOKENIZE_DATA;
+                            tz.raw_tag[0] = '\0';
+                        }
+                        if (fc_reprocess) { reprocess = 1; }
+                        continue;
+                    }
+                }
+            }
 
             switch (t.type) {
                 case TOKEN_DOCTYPE:
@@ -2318,6 +2489,11 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
 
     while (1) {
         token_init(&t);
+        /* Set CDATA flag based on whether current node is in foreign content */
+        {
+            node *top = stack_top(&st);
+            tz.allow_cdata = (top && top->ns != NS_HTML) ? 1 : 0;
+        }
         tokenizer_next(&tz, &t);
 
         node *parent;
@@ -2327,6 +2503,28 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
         while (reprocess) {
             reprocess = 0;
             parent = current_node(&st, doc);
+
+            /* Foreign content check */
+            {
+                node *acn = (st.size > 0) ? stack_top(&st) : NULL;
+                if (acn && acn->ns != NS_HTML) {
+                    int fc_reprocess = 0;
+                    if (process_in_foreign_content(t.type, t.name, t.data,
+                            t.self_closing, t.attrs, t.attr_count,
+                            &st, &fmt, doc, &mode, &fc_reprocess, context)) {
+                        /* Reset tokenizer if SVG <title> was handled in foreign
+                           content — tokenizer already switched to RCDATA. */
+                        if (t.type == TOKEN_START_TAG && t.name &&
+                            acn->ns == NS_SVG && strcmp(t.name, "title") == 0 &&
+                            !fc_reprocess) {
+                            tz.state = TOKENIZE_DATA;
+                            tz.raw_tag[0] = '\0';
+                        }
+                        if (fc_reprocess) { reprocess = 1; }
+                        continue;
+                    }
+                }
+            }
 
             switch (t.type) {
                 case TOKEN_START_TAG:

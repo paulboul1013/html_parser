@@ -1126,6 +1126,7 @@ void tokenizer_init(tokenizer *tz, const char *input) {
     tz->col = 1;
     tz->state = TOKENIZE_DATA;
     tz->raw_tag[0] = '\0';
+    tz->allow_cdata = 0;
 }
 
 static void set_raw_state(tokenizer *tz, const char *tag, tokenizer_state state) {
@@ -1251,6 +1252,28 @@ void tokenizer_next(tokenizer *tz, token *out) {
         }
         if (next == '!' && starts_with_ci(tz, "<!DOCTYPE")) {
             parse_doctype(tz, out);
+            return;
+        }
+        if (next == '!' && tz->allow_cdata &&
+            peek(tz, 2) == '[' && peek(tz, 3) == 'C' && peek(tz, 4) == 'D' &&
+            peek(tz, 5) == 'A' && peek(tz, 6) == 'T' && peek(tz, 7) == 'A' &&
+            peek(tz, 8) == '[') {
+            advance(tz, 9); /* skip <![CDATA[ */
+            size_t start = tz->pos;
+            while (tz->pos + 2 < tz->len) {
+                if (tz->input[tz->pos] == ']' && tz->input[tz->pos+1] == ']' &&
+                    tz->input[tz->pos+2] == '>') {
+                    out->type = TOKEN_CHARACTER;
+                    out->data = substr_dup(tz->input, start, tz->pos);
+                    advance(tz, 3); /* skip ]]> */
+                    return;
+                }
+                advance(tz, 1);
+            }
+            /* Unclosed CDATA: emit remaining as character */
+            out->type = TOKEN_CHARACTER;
+            out->data = substr_dup(tz->input, start, tz->len);
+            tz->pos = tz->len;
             return;
         }
         if (next == '!') {

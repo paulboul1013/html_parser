@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -std=c11 -Wall -Wextra -O2 -g -DHAVE_ICONV
 
-SRC = src/token.c src/tokenizer.c src/tree.c src/tree_builder.c src/encoding.c
+SRC = src/token.c src/tokenizer.c src/tree.c src/tree_builder.c src/encoding.c src/foreign.c
 
 all: parse_html
 
@@ -47,6 +47,15 @@ test-html: parse_html
 	./parse_html tests/quirks_table_quirks.html
 	./parse_html tests/null_replacement.html
 	./parse_html tests/charref_attr_vs_text.html
+	./parse_html tests/svg_basic.html
+	./parse_html tests/svg_case_correction.html
+	./parse_html tests/svg_attr_correction.html
+	./parse_html tests/svg_breakout.html
+	./parse_html tests/svg_font_breakout.html
+	./parse_html tests/svg_integration_point.html
+	./parse_html tests/mathml_basic.html
+	./parse_html tests/svg_cdata.html
+	./parse_html tests/svg_nested.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo
