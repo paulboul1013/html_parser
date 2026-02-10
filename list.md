@@ -95,7 +95,7 @@
 | RAWTEXT end tag open state | 🔧 | |
 | RAWTEXT end tag name state | 🔧 | |
 
-**小結**：80 個狀態中 ~48 個完整實作，~16 個用替代方式實作（功能等效），~3 個未實作（PLAINTEXT + CDATA × 3）。RCDATA/RAWTEXT/Script 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
+**小結**：80 個狀態中 ~48 個完整實作，~16 個用替代方式實作（功能等效），~1 個未實作（PLAINTEXT）。CDATA 已透過 `allow_cdata` flag 實作。RCDATA/RAWTEXT/Script 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
 
 ### 1.2 Character References
 
@@ -160,7 +160,7 @@
 | after after body | ✅ | |
 | after after frameset | ⬜ | |
 
-**小結**：23 種模式中 14 種完整實作，4 種以合併方式實作（功能等效），5 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in head noscript、text）。
+**小結**：23 種模式中 15 種完整實作（含 in table text），4 種以合併方式實作（功能等效），4 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in head noscript）。
 
 ### 2.2 Tree Construction 演算法
 
@@ -221,7 +221,7 @@
 | Table section（`thead/tbody/tfoot`）遇新 section 關閉 | ✅ | |
 | `<tr>` 遇新 `<tr>` 關閉 | ✅ | |
 | `<td>` / `<th>` 遇新 cell 關閉 | ✅ | |
-| `<h1>`-`<h6>` 遇同級標題關閉 | ⬜ | WHATWG: heading 遇到 heading 自動關閉 |
+| `<h1>`-`<h6>` 遇同級標題關閉 | ✅ | heading 遇到 heading 自動關閉 |
 | `<body>` end tag 的 implied end tags | ✅ | |
 
 ### 2.6 Quirks Mode
@@ -244,7 +244,7 @@
 | Context element 決定 tokenizer 狀態 | ✅ | |
 | Context element 決定 insertion mode | ✅ | |
 | Context element 不出現在輸出 | ✅ | |
-| `<html>` 作為 context：form element pointer 設定 | ⬜ | |
+| `<html>` 作為 context：form element pointer 設定 | ✅ | `form_element_pointer = NULL`（規範行為） |
 | `<template>` 作為 context：template insertion modes stack | ✅ | `context=template` 會建立 `content` wrapper |
 | Context element 的 encoding 繼承 | ⬜ | |
 
@@ -316,7 +316,7 @@
 | `<colgroup>` / `<col>` 基本解析 | ✅ | |
 | Foster parenting（非表格內容） | ✅ | |
 | `<select>` in table → `in select in table` | ✅ | |
-| `<form>` in table 特殊處理 | ⬜ | |
+| `<form>` in table 特殊處理 | ✅ | foster parenting + form_element_pointer |
 | In table text 收集模式 | ✅ | 表格模式中緩衝文字，非空白 foster parent |
 
 ### 6.4 Form 相關
@@ -390,33 +390,40 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 | 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
 |------|--------|---------|--------|--------|
-| Tokenizer 狀態（80） | ~48 | ~16 | ~3 | ~80% |
-| Character References | 5/7 | 0 | 2 | 71% |
-| Insertion Modes（23） | 13 | 4 | 6 | ~74% |
+| Tokenizer 狀態（80） | ~48 | ~16 | ~1 | ~95% |
+| Character References | 6/7 | 0 | 1 | 86% |
+| Insertion Modes（23） | 15 | 4 | 4 | ~83% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
-| Formatting / AFE | 9/10 | 0 | 1 | 90% |
-| Scope | 4/6 | 0 | 2 | 67% |
-| Auto-close | 10/11 | 0 | 1 | 91% |
-| Fragment Parsing | 5/7 | 0 | 2 | 71% |
+| Formatting / AFE | 10/10 | 0 | 0 | 100% |
+| Scope | 5/6 | 0 | 1 | 83% |
+| Auto-close | 11/11 | 0 | 0 | 100% |
+| Fragment Parsing | 6/7 | 0 | 1 | 86% |
 | Encoding Sniffing | 12/14 | 0 | 2 | 86% |
 | Serialization | 10/11 | 0 | 1 | 91% |
 | Foreign Content | 9/9 | 0 | 0 | 100% |
+| Form | 2/3 | 0 | 1 | 67% |
 | Template | 3/4 | 1 | 0 | ~90% |
 
 ### 整體評估
 
-- **核心 HTML 解析（含 SVG/MathML）**：~90% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。
-- **完全符合 WHATWG 規範（含所有邊緣情況）**：~75% 完成。
+- **核心 HTML 解析（含 SVG/MathML）**：~92% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。
+- **完全符合 WHATWG 規範（含所有邊緣情況）**：~80% 完成。
 
-### 優先建議（按影響度排序）
+### 已完成里程碑
 
-1. **`<template>` Document Fragment** — ✅ 已完成
-2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正 ✅ 已完成
-4. **Marker 補充（`applet` / `marquee` / `object`）** — 完成（start push marker + end 清空至 marker；新增測資 `tests/applet_marker.html`）
-5. **CR/LF 正規化** — 輸入前處理 ✅
-6. **Numeric reference 範圍修正表** — 完成（加入 Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD；新增測資 `tests/numeric_reference_corrections.html`）
-7. **Noah's Ark attribute 比對** — 完成（tag+attrs 去重；新增壓力測試 `tests/formatting_noahs_ark.html`）
-7. **Noah's Ark attribute 比對** — 精確度提升
-8. **`in table text` 模式** — 完成（新增 pending text 收集 + foster；測資 `tests/table_text_mode.html`）
-9. **`<form>` element pointer** — ✅ 完成（form_element_pointer 追蹤 + form_owner 關聯；測資 `tests/form_test.html`）
-10. **完整 parse error 報告** — 系統性驗證
+1. ✅ **`<template>` Document Fragment** — `content` wrapper 表示
+2. ✅ **Heading auto-close（`<h1>`-`<h6>`）** — heading 遇 heading 自動關閉
+3. ✅ **Marker 補充（`applet` / `marquee` / `object`）** — start push marker + end 清空至 marker
+4. ✅ **CR/LF 正規化** — 輸入前處理
+5. ✅ **Numeric reference 範圍修正表** — Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD
+6. ✅ **Noah's Ark attribute 比對** — tag+attrs 去重，精確度提升
+7. ✅ **`in table text` 模式** — pending text 收集 + foster
+8. ✅ **`<form>` element pointer** — form_element_pointer 追蹤 + form_owner 關聯
+9. ✅ **Foreign Content（SVG/MathML）** — 命名空間、Integration Points、CDATA、大小寫修正
+
+### 剩餘待完成項目
+
+1. **完整 parse error 報告** — 系統性驗證所有 WHATWG 定義的 tree construction parse error
+2. **`<input>` type=hidden 在 table 中的特殊處理** — 不 foster parent，直接插入 table
+3. **Select scope** — 除 `optgroup` / `option` 外所有元素皆為障壁
+4. **`<frameset>` 模式** — 已淘汰，極低優先

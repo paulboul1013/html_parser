@@ -60,13 +60,15 @@ make test-html
 ### 第二階段：樹構建（`tree.h/c`、`tree_builder.h/c`）
 
 - 維護一個 **開放元素棧**（`node_stack`）與一個 **活躍格式化列表**（`formatting_list`）作為核心可變狀態。
-- 一個 `insertion_mode` 列舉（13 種模式）決定哪些令牌會被接受及如何處理 — 緊密對應 WHATWG 規範的插入模式算法。
+- 一個 `insertion_mode` 列舉（15 種模式）決定哪些令牌會被接受及如何處理 — 緊密對應 WHATWG 規範的插入模式算法。
 - 已實現的關鍵算法：
   - **自動關閉**：`p` 在遇到塊級元素開始時被關閉；`li`/`dt`/`dd` 在遇到同類兄弟元素時被關閉；表格sections（`thead`/`tbody`/`tfoot`/`tr`/`td`/`th`）在遇到新的section/行/儲元格時自動關閉。
   - **Generate implied end tags（WHATWG §13.2.6.3）**：集中函數 `generate_implied_end_tags()` / `generate_implied_end_tags_except()` 在 `</p>`、`</li>`、`</dd>`/`</dt>`、`</body>` end tag 處理前，從棧頂反覆彈出 implied-closable 元素（`dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc`）。`<option>` / `<optgroup>` start tag 也有對應的 auto-close 邏輯。
   - **收養代理 / 活躍格式化**：`b`/`i`/`em`/`strong` 被追蹤；重建程序在中斷後重新插入它們。Noah's Ark 條款將活躍列表中每個標記限制為最多 3 條。
   - **收養父化（Foster parenting）**：在表格模式下遇到的非表格內容，將插入到 `<table>` 元素的直接前方而非內部。
-  - **Quirks 模式**：由 DOCTYPE 的 public/system ID 判定。模式已儲存（`NO_QUIRKS`、`LIMITED_QUIRKS`、`QUIRKS`），但尚未用於改變樹構建規則 — 詳見 `list.md` 中的後續工作說明。
+  - **Foreign Content（SVG/MathML）**：`<svg>` 和 `<math>` 進入對應命名空間（`NS_SVG`、`NS_MATHML`）。包含 breakout 偵測、SVG/MathML 元素/屬性大小寫修正、Integration Points、CDATA 區段。
+  - **`<form>` element pointer**：WHATWG 定義的 form element pointer，自動將 form-associated 元素（`input`/`button`/`select`/`textarea`/`fieldset`/`output`/`object`/`img`）關聯至所屬 `<form>`。
+  - **Quirks 模式**：由 DOCTYPE 的 public/system ID 判定。模式已儲存（`NO_QUIRKS`、`LIMITED_QUIRKS`、`QUIRKS`），已套用於 `<table>` 不自動關閉 `<p>` 的規則。
 - 當某個模式處理程序判定當前令牌應在不同模式下重新評估時，采用令牌重新處理迴圈（`goto reprocess`），避免遞迴調用。
 
 ### 片段解析
@@ -86,7 +88,9 @@ make test-html
 | `src/token.h/c` | Token 結構及生命週期管理（init/free） |
 | `src/tokenizer.h/c` | 有狀態詞法分析器；實體裝載；字元參考解碼 |
 | `src/tree.h/c` | 節點結構、子節點連接、遞迴釋放、ASCII 輸出 |
-| `src/tree_builder.h/c` | 插入模式、自動關閉、generate implied end tags、格式化處理、收養父化、Quirks 檢測 |
+| `src/tree_builder.h/c` | 插入模式、自動關閉、generate implied end tags、格式化處理、收養父化、Quirks 檢測、Foreign Content 處理 |
+| `src/foreign.h/c` | Foreign Content 查找表（breakout tags、SVG/MathML 名稱修正）、Integration Points、命名空間感知 scope/special |
+| `src/encoding.h/c` | WHATWG 編碼嗅探、39 種編碼查找表、BOM/meta prescan、iconv/內建 UTF-16 轉換 |
 | `src/parse_file_demo.c` | 完整文件解析的 CLI 入口點 |
 | `src/parse_fragment_demo.c` | 片段解析的 CLI 入口點 |
 | `entities.tsv` | WHATWG 命名字元參考表（定界符分隔） |
@@ -99,8 +103,8 @@ make test-html
 - **請你回答說繁體中文**
 - **`entities.tsv` 必須從執行時的工作目錄中可以訪問。** 若二元程序從不同目錜執行，實體解析將回退至內建子集。
 - **僅含空白的文本節點會在樹構建時被捨棄**（`is_all_whitespace` 過濾）。這符合瀏覽器行為，但不重要的空白不會出現在輸出中。
-- **Quirks 模式已偵測但未執行。** `doc_mode` 已被正確設定；Quirks/Limited-quirks 對應的樹構建規則變更列為 P3 後續工作。
-- **不支持外國內容。** SVG 與 MathML 元素未被特別處理 — 它們被視為普通的 HTML 元素。
+- **Quirks 模式已部分套用。** `doc_mode` 已被正確設定；Quirks 模式下 `<table>` 不自動關閉 `<p>` 的規則已實作。
+- **支援 Foreign Content。** SVG 與 MathML 元素在各自命名空間中正確處理，包含 breakout、Integration Points、CDATA 區段。
 
 ---
 
@@ -133,11 +137,17 @@ make test-html
 | Quirks / Limited-quirks 模式判定（由 DOCTYPE 推算） | ✅ |
 | 片段解析（context element 初始化 + 特殊插入規則） | ✅ |
 
-### P3 — 進階相容（部分完成）
+### P3 — 進階相容（大部分完成）
 
 | 功能 | 狀態 |
 |------|------|
 | Generate implied end tags（WHATWG §13.2.6.3，含 `</p>`/`</li>`/`</dd>`/`</dt>`/`</body>` 專用處理、`<option>`/`<optgroup>` auto-close） | ✅ |
-| Foreign content 支持（SVG / MathML 命名空間、Integration points） | ⏳ |
-| Quirks 模式對樹構建規則的實際套用 | ⏳ |
+| Foreign Content 支援（SVG / MathML 命名空間、Integration Points、CDATA） | ✅ |
+| `<h1>`-`<h6>` Heading auto-close | ✅ |
+| CR/LF 正規化 | ✅ |
+| Numeric reference 範圍修正（Windows-1252 映射） | ✅ |
+| Noah's Ark attribute 比對（精確 tag+attrs 去重） | ✅ |
+| `in table text` 模式 | ✅ |
+| `<form>` element pointer（form-associated 元素自動關聯） | ✅ |
+| Quirks 模式對樹構建規則的部分套用 | ✅ |
 | 完整 parser error recovery（所有 parse errors 的標準化容錯行為） | ⏳ |
