@@ -195,7 +195,7 @@
 | Adoption Agency outer loop（8 次上限） | ✅ | |
 | Adoption Agency inner loop（8 次上限） | ✅ | |
 | Clone element（replacement） | ✅ | `clone_element_shallow()` |
-| Noah's Ark attribute 比對 | ⬜ | 目前只比對 tag name，WHATWG 要求還比對屬性 |
+| Noah's Ark attribute 比對 | ✅ | 比對 tag + attributes，超過 3 同組清最早 |
 
 ### 2.4 Scope（範圍）
 
@@ -415,6 +415,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 4. **Marker 補充（`applet` / `marquee` / `object`）** — 完成（start push marker + end 清空至 marker；新增測資 `tests/applet_marker.html`）
 5. **CR/LF 正規化** — 輸入前處理 ✅
 6. **Numeric reference 範圍修正表** — 完成（加入 Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD；新增測資 `tests/numeric_reference_corrections.html`）
+7. **Noah's Ark attribute 比對** — 完成（tag+attrs 去重；新增壓力測試 `tests/formatting_noahs_ark.html`）
 7. **Noah's Ark attribute 比對** — 精確度提升
 8. **`in table text` 模式** — 表格內文字的精確處理
 9. **`<form>` element pointer** — 表單相關場景

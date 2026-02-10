@@ -1,0 +1,17 @@
+--- tests/formatting_noahs_ark_effect.html ---
+DOCUMENT
+\-- ELEMENT name="html"
+    \-- ELEMENT name="body"
+        |-- ELEMENT name="div"
+        |   \-- ELEMENT name="b" [class="x"]
+        |       |-- TEXT data="1\n    "
+        |       \-- ELEMENT name="b" [class="x"]
+        |           |-- TEXT data="2\n      "
+        |           \-- ELEMENT name="b" [class="x"]
+        |               |-- TEXT data="3\n        "
+        |               \-- ELEMENT name="b" [class="x"]
+        |                   \-- TEXT data="4\n"
+        \-- ELEMENT name="b" [class="x"]
+            \-- ELEMENT name="b" [class="x"]
+                \-- ELEMENT name="b" [class="x"]
+                    \-- TEXT data="\nHello\n"

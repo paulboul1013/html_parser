@@ -103,6 +103,7 @@ static int is_table_element(const char *name);
 static int is_heading_element(const char *name);
 static int stack_has_open_heading(node_stack *st);
 static void stack_pop_until_heading(node_stack *st);
+static node *clone_element_shallow(node *original);
 static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
                                    formatting_list *fmt, insertion_mode *mode,
                                    insertion_mode *template_mode_stack, int *template_mode_top,
@@ -162,26 +163,6 @@ static void stack_insert_at(node_stack *st, size_t index, node *n) {
     st->size++;
 }
 
-static const char *fmt_tag_name(fmt_tag t) {
-    switch (t) {
-        case FMT_A: return "a";
-        case FMT_B: return "b";
-        case FMT_BIG: return "big";
-        case FMT_CODE: return "code";
-        case FMT_EM: return "em";
-        case FMT_FONT: return "font";
-        case FMT_I: return "i";
-        case FMT_NOBR: return "nobr";
-        case FMT_S: return "s";
-        case FMT_SMALL: return "small";
-        case FMT_STRIKE: return "strike";
-        case FMT_STRONG: return "strong";
-        case FMT_TT: return "tt";
-        case FMT_U: return "u";
-        default: return "";
-    }
-}
-
 static fmt_tag fmt_tag_from_name(const char *name) {
     if (!name) return FMT_NONE;
     if (strcmp(name, "a") == 0) return FMT_A;
@@ -208,6 +189,19 @@ static int stack_has_open_named(node_stack *st, const char *name) {
         if (n && n->name && strcmp(n->name, name) == 0) return 1;
     }
     return 0;
+}
+
+static int attrs_equal(const node *a, const node *b) {
+    if (!a || !b) return 0;
+    if (a->attr_count != b->attr_count) return 0;
+    for (size_t i = 0; i < a->attr_count; ++i) {
+        const char *an = a->attrs[i].name ? a->attrs[i].name : "";
+        const char *av = a->attrs[i].value ? a->attrs[i].value : "";
+        const char *bn = b->attrs[i].name ? b->attrs[i].name : "";
+        const char *bv = b->attrs[i].value ? b->attrs[i].value : "";
+        if (strcmp(an, bn) != 0 || strcmp(av, bv) != 0) return 0;
+    }
+    return 1;
 }
 
 static int in_template_context(node_stack *st) {
@@ -342,7 +336,7 @@ static void formatting_push(formatting_list *fl, fmt_tag tag, node *element) {
     size_t count_same = 0;
     size_t earliest_index = 0;
     for (size_t i = 0; i < fl->count; ++i) {
-        if (fl->items[i].tag == tag) {
+        if (fl->items[i].tag == tag && attrs_equal(fl->items[i].element, element)) {
             if (count_same == 0) earliest_index = i;
             count_same++;
         }
@@ -542,17 +536,17 @@ static void reconstruct_active_formatting(node_stack *st, formatting_list *fl, n
     /* Reconstruct each entry in [first, count).  Markers are skipped. */
     for (size_t i = first; i < fl->count; ++i) {
         if (fl->items[i].tag == FMT_MARKER) continue;
-        const char *name = fmt_tag_name(fl->items[i].tag);
-        if (name[0] == '\0') continue;
-        node *n = node_create(NODE_ELEMENT, name, NULL);
+        node *source = fl->items[i].element;
+        if (!source) continue;
+        node *n = clone_element_shallow(source);
         if (!n) continue;
         node_append_child(parent, n);
         stack_push(st, n);
         fl->items[i].element = n;
+        parent = n;
     }
 }
 
-static node *clone_element_shallow(node *original);
 static int is_foster_parent_target(const char *name);
 static void foster_insert(node_stack *st, node *doc, node *child);
 

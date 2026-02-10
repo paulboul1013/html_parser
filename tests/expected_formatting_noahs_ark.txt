@@ -1,0 +1,13 @@
+--- tests/formatting_noahs_ark.html ---
+DOCUMENT
+\-- ELEMENT name="html"
+    \-- ELEMENT name="body"
+        \-- ELEMENT name="div"
+            \-- ELEMENT name="b" [class="x"]
+                |-- TEXT data="1"
+                \-- ELEMENT name="b" [class="x"]
+                    |-- TEXT data="2"
+                    \-- ELEMENT name="b" [class="x"]
+                        |-- TEXT data="3"
+                        \-- ELEMENT name="b" [class="x"]
+                            \-- TEXT data="4"

@@ -61,6 +61,10 @@ test-html: parse_html
 	./parse_html tests/applet_marker.html
 	./parse_html tests/crlf_normalization.html
 	./parse_html tests/numeric_reference_corrections.html
+	./parse_html tests/formatting_noahs_ark_stress.html
+	./parse_html tests/formatting_noahs_ark_reconstruct.html
+	./parse_html tests/formatting_noahs_ark_effect.html
+	./parse_html tests/formatting_noahs_ark.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo
