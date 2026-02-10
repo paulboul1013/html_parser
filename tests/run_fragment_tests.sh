@@ -267,9 +267,7 @@ run "13  CR/LF normalization" \
     div "$tmp_crlf" pass <<'EOF'
 ASCII Tree (Fragment)
 DOCUMENT
-\-- TEXT data="A
-B
-C"
+\-- TEXT data="A\nB\nC"
 EOF
 rm -f "$tmp_crlf"
 

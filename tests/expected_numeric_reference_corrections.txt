@@ -1,0 +1,7 @@
+--- tests/numeric_reference_corrections.html ---
+DOCUMENT
+|-- DOCTYPE name="html"
+\-- ELEMENT name="html"
+    \-- ELEMENT name="body"
+        \-- ELEMENT name="p"
+            \-- TEXT data="€ � € � 􏿿 �"

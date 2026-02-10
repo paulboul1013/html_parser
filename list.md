@@ -106,7 +106,7 @@
 | Numeric character references（十六進位 `&#x7B;`） | ✅ | |
 | 無分號容錯（legacy entities） | ✅ | |
 | Attribute context 中的差異處理（`=` / alnum 後不解碼） | ✅ | |
-| Numeric reference 範圍修正（§13.2.5.5 table） | ⬜ | 如 `&#128;` → U+20AC 等 Windows-1252 修正表 |
+| Numeric reference 範圍修正（§13.2.5.5 table） | ✅ | Windows-1252 控制區對應、控制碼/無效碼點 → U+FFFD |
 | Noncharacter / surrogate 偵測 | ⬜ | 數字解碼後未檢查 noncharacter 範圍 |
 
 ### 1.3 Token 類型
@@ -413,8 +413,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 1. **`<template>` Document Fragment** — ✅ 已完成
 2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正 ✅ 已完成
 4. **Marker 補充（`applet` / `marquee` / `object`）** — 完成（start push marker + end 清空至 marker；新增測資 `tests/applet_marker.html`）
-5. **CR/LF 正規化** — 輸入前處理
-6. **Numeric reference 範圍修正表** — 精確度提升
+5. **CR/LF 正規化** — 輸入前處理 ✅
+6. **Numeric reference 範圍修正表** — 完成（加入 Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD；新增測資 `tests/numeric_reference_corrections.html`）
 7. **Noah's Ark attribute 比對** — 精確度提升
 8. **`in table text` 模式** — 表格內文字的精確處理
 9. **`<form>` element pointer** — 表單相關場景
