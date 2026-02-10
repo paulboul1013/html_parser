@@ -189,7 +189,7 @@
 | 14 種 Formatting Elements 支援 | ✅ | `a`, `b`, `big`, `code`, `em`, `font`, `i`, `nobr`, `s`, `small`, `strike`, `strong`, `tt`, `u` |
 | Noah's Ark clause（同元素限制 3 筆） | ✅ | |
 | Marker 推入（`td` / `th` / `caption`） | ✅ | |
-| Marker 推入（`applet` / `marquee` / `object`） | ⬜ | |
+| Marker 推入（`applet` / `marquee` / `object`） | ✅ | |
 | Marker 推入（`template`） | ✅ | |
 | Clear to marker | ✅ | |
 | Adoption Agency outer loop（8 次上限） | ✅ | |
@@ -411,8 +411,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 ### 優先建議（按影響度排序）
 
 1. **`<template>` Document Fragment** — ✅ 已完成
-2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正
-4. **Marker 補充（`applet` / `marquee` / `object`）** — 低成本修正
+2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正 ✅ 已完成
+4. **Marker 補充（`applet` / `marquee` / `object`）** — 完成（start push marker + end 清空至 marker；新增測資 `tests/applet_marker.html`）
 5. **CR/LF 正規化** — 輸入前處理
 6. **Numeric reference 範圍修正表** — 精確度提升
 7. **Noah's Ark attribute 比對** — 精確度提升

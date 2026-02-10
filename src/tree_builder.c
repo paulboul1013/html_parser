@@ -100,6 +100,9 @@ typedef struct {
 static void stack_pop_until(node_stack *st, const char *name);
 static int is_void_element(const char *name);
 static int is_table_element(const char *name);
+static int is_heading_element(const char *name);
+static int stack_has_open_heading(node_stack *st);
+static void stack_pop_until_heading(node_stack *st);
 static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
                                    formatting_list *fmt, insertion_mode *mode,
                                    insertion_mode *template_mode_stack, int *template_mode_top,
@@ -835,6 +838,18 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
     if (is_body_ignored_start(name)) {
         return;
     }
+    if (is_heading_element(name) && stack_has_open_heading(st)) {
+        stack_pop_until_heading(st);
+    }
+    if (name && (strcmp(name, "applet") == 0 || strcmp(name, "marquee") == 0 || strcmp(name, "object") == 0)) {
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, name, NULL);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(parent, n);
+        formatting_push_marker(fmt);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
     /* <table> closes an open <p> (unless quirks mode), then switches to IN_TABLE. */
     if (name && strcmp(name, "table") == 0) {
         if (dmode != DOC_QUIRKS && has_element_in_button_scope(st, "p")) {
@@ -1015,6 +1030,36 @@ static int is_body_block_like_start(const char *name) {
            strcmp(name, "section") == 0 ||
            strcmp(name, "table") == 0 ||
            strcmp(name, "ul") == 0;
+}
+
+static int is_heading_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "h1") == 0 || strcmp(name, "h2") == 0 ||
+           strcmp(name, "h3") == 0 || strcmp(name, "h4") == 0 ||
+           strcmp(name, "h5") == 0 || strcmp(name, "h6") == 0;
+}
+
+static int stack_has_open_heading(node_stack *st) {
+    if (!st) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (n && n->name && is_heading_element(n->name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void stack_pop_until_heading(node_stack *st) {
+    if (!st) return;
+    while (st->size > 0) {
+        node *n = stack_top(st);
+        if (n && n->name && is_heading_element(n->name)) {
+            stack_pop(st);
+            return;
+        }
+        stack_pop(st);
+    }
 }
 
 static char to_lower_ascii_local(char c) {
@@ -1222,6 +1267,11 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     if (name && strcmp(name, "html") == 0) {
         return;
     }
+    if (name && is_heading_element(name)) {
+        if (stack_has_open_heading(st)) {
+            stack_pop_until_heading(st);
+        }
+    }
     if (name && strcmp(name, "body") == 0) {
         if (!in_template) {
             ensure_body(doc, st, html, body);
@@ -1275,6 +1325,18 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         node *n = node_create_ns(NODE_ELEMENT, "math", NULL, NS_MATHML);
         attach_attrs(n, attrs, attr_count);
         node_append_child(current_node(st, doc), n);
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
+    if (name && (strcmp(name, "applet") == 0 || strcmp(name, "marquee") == 0 || strcmp(name, "object") == 0)) {
+        if (!in_template) {
+            ensure_body(doc, st, html, body);
+        }
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, name, NULL);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(parent, n);
+        formatting_push_marker(fmt);
         if (!self_closing) stack_push(st, n);
         return;
     }
@@ -2140,6 +2202,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                         break;
                     }
+                    if (t->name && (strcmp(t->name, "applet") == 0 || strcmp(t->name, "marquee") == 0 || strcmp(t->name, "object") == 0)) {
+                        if (!has_element_in_scope(&st, t->name)) break;
+                        generate_implied_end_tags(&st);
+                        stack_pop_until(&st, t->name);
+                        formatting_clear_to_marker(&fmt);
+                        break;
+                    }
                     if (t->name && strcmp(t->name, "html") == 0) {
                         stack_pop_until(&st, "html");
                         if (mode == MODE_AFTER_BODY) {
@@ -2778,6 +2847,13 @@ node *build_tree_from_input(const char *input) {
                         } else {
                             mode = MODE_IN_BODY;
                         }
+                        break;
+                    }
+                    if (t.name && (strcmp(t.name, "applet") == 0 || strcmp(t.name, "marquee") == 0 || strcmp(t.name, "object") == 0)) {
+                        if (!has_element_in_scope(&st, t.name)) break;
+                        generate_implied_end_tags(&st);
+                        stack_pop_until(&st, t.name);
+                        formatting_clear_to_marker(&fmt);
                         break;
                     }
                     if (t.name && strcmp(t.name, "html") == 0) {
