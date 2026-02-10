@@ -181,6 +181,15 @@ static void dump_node(const node *n, const char *prefix, int is_last) {
         }
         printf("]");
     }
+    if (n->form_owner && n->form_owner->attrs) {
+        /* Find "id" attr on form_owner to display */
+        for (size_t i = 0; i < n->form_owner->attr_count; ++i) {
+            if (n->form_owner->attrs[i].name && strcmp(n->form_owner->attrs[i].name, "id") == 0) {
+                printf(" form=\"%s\"", n->form_owner->attrs[i].value ? n->form_owner->attrs[i].value : "");
+                break;
+            }
+        }
+    }
     printf("\n");
 
     snprintf(next_prefix, sizeof(next_prefix), "%s%s", prefix, is_last ? "    " : "|   ");

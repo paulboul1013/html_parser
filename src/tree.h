@@ -33,6 +33,7 @@ typedef struct node {
     struct node *first_child;
     struct node *last_child;
     struct node *next_sibling;
+    struct node *form_owner; /* form element pointer association (non-owning) */
 } node;
 
 node *node_create(node_type type, const char *name, const char *data);

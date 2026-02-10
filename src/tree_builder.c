@@ -117,6 +117,19 @@ static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
                                    insertion_mode *template_mode_stack, int *template_mode_top,
                                    int *reprocess);
 
+/* Form-associated elements — automatically linked to form_element_pointer */
+static int is_form_associated_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "input") == 0 ||
+           strcmp(name, "button") == 0 ||
+           strcmp(name, "select") == 0 ||
+           strcmp(name, "textarea") == 0 ||
+           strcmp(name, "fieldset") == 0 ||
+           strcmp(name, "output") == 0 ||
+           strcmp(name, "object") == 0 ||
+           strcmp(name, "img") == 0;
+}
+
 static void stack_init(node_stack *st) {
     st->size = 0;
 }
@@ -873,7 +886,8 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
                                           formatting_list *fmt, insertion_mode *mode,
                                           insertion_mode *template_mode_stack, int *template_mode_top,
                                           doc_mode dmode,
-                                          const token_attr *attrs, size_t attr_count) {
+                                          const token_attr *attrs, size_t attr_count,
+                                          node **form_element_pointer) {
     /* Table-related tags are parse errors in IN_BODY; ignore them. */
     if (is_body_ignored_start(name)) {
         return;
@@ -938,6 +952,26 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
         open_template_element(st, fmt, mode, template_mode_stack, template_mode_top, tmpl, self_closing);
         return;
     }
+    if (name && strcmp(name, "form") == 0) {
+        if (form_element_pointer && *form_element_pointer && !in_template_context(st)) {
+            /* Parse error: ignore nested form */
+            return;
+        }
+        if (dmode != DOC_QUIRKS && has_element_in_button_scope(st, "p")) {
+             stack_pop_until(st, "p");
+        }
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "form", NULL);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(parent, n);
+        
+        if (form_element_pointer && !in_template_context(st)) {
+            *form_element_pointer = n;
+        }
+
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
     fmt_tag ft = fmt_tag_from_name(name);
     if (ft != FMT_NONE) {
         node *parent = current_node(st, doc);
@@ -951,6 +985,9 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
     if (!self_closing && !is_void_element(name)) {
         stack_push(st, n);
         if (ft != FMT_NONE) formatting_push(fmt, ft, n);
+    }
+    if (is_form_associated_element(name) && form_element_pointer && *form_element_pointer && !in_template_context(st)) {
+        n->form_owner = *form_element_pointer;
     }
 }
 
@@ -1296,7 +1333,8 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
                                  formatting_list *fmt, insertion_mode *mode,
                                  insertion_mode *template_mode_stack, int *template_mode_top,
                                  doc_mode dmode,
-                                 const token_attr *attrs, size_t attr_count) {
+                                 const token_attr *attrs, size_t attr_count,
+                                 node **form_element_pointer) {
     if (!mode) return;
     int in_template = in_template_context(st);
     fmt_tag ft = fmt_tag_from_name(name);
@@ -1391,6 +1429,29 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         open_template_element(st, fmt, mode, template_mode_stack, template_mode_top, tmpl, self_closing);
         return;
     }
+    if (name && strcmp(name, "form") == 0) {
+        if (form_element_pointer && *form_element_pointer && !in_template) {
+            /* Parse error: ignore nested form */
+            return;
+        }
+        if (has_element_in_button_scope(st, "p")) {
+             stack_pop_until(st, "p");
+        }
+        if (!in_template) {
+            ensure_body(doc, st, html, body);
+        }
+        node *parent = current_node(st, doc);
+        node *n = node_create(NODE_ELEMENT, "form", NULL);
+        attach_attrs(n, attrs, attr_count);
+        node_append_child(parent, n);
+        
+        if (form_element_pointer && !in_template) {
+            *form_element_pointer = n;
+        }
+
+        if (!self_closing) stack_push(st, n);
+        return;
+    }
     body_autoclose_on_start(st, name, dmode);
     if (!in_template) {
         ensure_body(doc, st, html, body);
@@ -1402,6 +1463,9 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     if (!self_closing && !is_void_element(name)) {
         stack_push(st, n);
         if (ft != FMT_NONE) formatting_push(fmt, ft, n);
+    }
+    if (is_form_associated_element(name) && form_element_pointer && *form_element_pointer && !in_template) {
+        n->form_owner = *form_element_pointer;
     }
 }
 
@@ -1726,6 +1790,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
     int template_mode_top = 0;
     text_buffer table_text = {0};
     int table_text_has_non_ws = 0;
+    node *form_element_pointer = NULL;
     size_t i;
 
     if (!doc) return NULL;
@@ -1853,14 +1918,14 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         if (cur && cur->name && !is_table_element(cur->name)) {
                             handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode,
                                                  template_mode_stack, &template_mode_top, dmode,
-                                                 t->attrs, t->attr_count);
+                                                 t->attrs, t->attr_count, &form_element_pointer);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
                         handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode,
                                              template_mode_stack, &template_mode_top, dmode,
-                                             t->attrs, t->attr_count);
+                                             t->attrs, t->attr_count, &form_element_pointer);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -1941,6 +2006,28 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                                       tmpl, t->self_closing);
                                 break;
                             }
+                            if (t->name && strcmp(t->name, "form") == 0) {
+                                if (form_element_pointer && !in_template_context(&st)) {
+                                    /* ignore nested form */
+                                    break;
+                                }
+                                node *table = NULL;
+                                node *fp = foster_parent(&st, doc, &table);
+                                n = node_create(NODE_ELEMENT, "form", NULL);
+                                attach_attrs(n, t->attrs, t->attr_count);
+                                if (table && fp == table->parent) {
+                                    node_insert_before(fp, n, table);
+                                } else {
+                                    node_append_child(fp, n);
+                                }
+                                if (form_element_pointer == NULL && !in_template_context(&st)) {
+                                    form_element_pointer = n;
+                                }
+                                if (!t->self_closing) {
+                                    stack_push(&st, n);
+                                }
+                                break;
+                            }
                             fmt_tag ft = fmt_tag_from_name(t->name);
                             node *table = NULL;
                             node *fp = foster_parent(&st, doc, &table);
@@ -1957,6 +2044,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             if (!t->self_closing && !is_void_element(t->name)) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
+                            }
+                            if (is_form_associated_element(t->name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
                             }
                             break;
                         }
@@ -2033,6 +2123,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
+                            if (is_form_associated_element(t->name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_ROW) {
@@ -2086,6 +2179,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
+                            if (is_form_associated_element(t->name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
@@ -2112,7 +2208,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                         handle_in_body_start(t->name, t->self_closing, doc, &st, &html, &body, &fmt, &mode,
                                              template_mode_stack, &template_mode_top, dmode,
-                                             t->attrs, t->attr_count);
+                                             t->attrs, t->attr_count, &form_element_pointer);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t->name && (strcmp(t->name, "table") == 0 || strcmp(t->name, "tr") == 0 || is_table_section_element(t->name))) {
                             stack_pop_until(&st, "caption");
@@ -2185,6 +2281,28 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && strcmp(t->name, "head") == 0 && mode == MODE_IN_HEAD) {
                         close_head(&st, &head, &mode);
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "form") == 0 && mode == MODE_IN_BODY) {
+                        if (!in_template_context(&st)) {
+                            node *node_ptr = form_element_pointer;
+                            form_element_pointer = NULL;
+                            int idx;
+                            if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                if (node_ptr == NULL) break;
+                                if (!has_element_in_scope(&st, "form")) break;
+                            }
+                            generate_implied_end_tags(&st);
+                            idx = stack_index_of(&st, node_ptr);
+                            if (idx >= 0) {
+                                stack_remove_at(&st, idx);
+                            }
+                        } else {
+                             if (has_element_in_scope(&st, "form")) {
+                                 generate_implied_end_tags(&st);
+                                 stack_pop_until(&st, "form");
+                             }
+                        }
                         break;
                     }
                     if (t->name && strcmp(t->name, "body") == 0 && mode == MODE_IN_BODY) {
@@ -2389,6 +2507,7 @@ node *build_tree_from_input(const char *input) {
     int template_mode_top = 0;
     text_buffer table_text = {0};
     int table_text_has_non_ws = 0;
+    node *form_element_pointer = NULL;
 
     if (!doc) return NULL;
     stack_init(&st);
@@ -2532,17 +2651,36 @@ node *build_tree_from_input(const char *input) {
                         if (cur && cur->name && !is_table_element(cur->name)) {
                             handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode,
                                                  template_mode_stack, &template_mode_top, dmode,
-                                                 t.attrs, t.attr_count);
+                                                 t.attrs, t.attr_count, &form_element_pointer);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
                         handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode,
                                              template_mode_stack, &template_mode_top, dmode,
-                                             t.attrs, t.attr_count);
+                                             t.attrs, t.attr_count, &form_element_pointer);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
+                        if (t.name && strcmp(t.name, "form") == 0) {
+                            if (form_element_pointer && !in_template_context(&st)) {
+                                break;
+                            }
+                            node *table = NULL;
+                            node *fp = foster_parent(&st, doc, &table);
+                            n = node_create(NODE_ELEMENT, "form", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
+                            if (table && fp == table->parent) {
+                                node_insert_before(fp, n, table);
+                            } else {
+                                node_append_child(fp, n);
+                            }
+                            if (!in_template_context(&st)) {
+                                form_element_pointer = n;
+                            }
+                            stack_push(&st, n);
+                            break;
+                        }
                         if (t.name && strcmp(t.name, "caption") == 0) {
                             parent = current_node(&st, doc);
                             n = node_create(NODE_ELEMENT, "caption", NULL);
@@ -2637,6 +2775,9 @@ node *build_tree_from_input(const char *input) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_HEAD) {
@@ -2712,6 +2853,9 @@ node *build_tree_from_input(const char *input) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_ROW) {
@@ -2765,6 +2909,9 @@ node *build_tree_from_input(const char *input) {
                                 stack_push(&st, n);
                                 if (ft != FMT_NONE) formatting_push(&fmt, ft, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
@@ -2791,7 +2938,7 @@ node *build_tree_from_input(const char *input) {
                         }
                         handle_in_body_start(t.name, t.self_closing, doc, &st, &html, &body, &fmt, &mode,
                                              template_mode_stack, &template_mode_top, dmode,
-                                             t.attrs, t.attr_count);
+                                             t.attrs, t.attr_count, &form_element_pointer);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && (strcmp(t.name, "table") == 0 || strcmp(t.name, "tr") == 0 || is_table_section_element(t.name))) {
                             stack_pop_until(&st, "caption");
@@ -2869,6 +3016,28 @@ node *build_tree_from_input(const char *input) {
                         generate_implied_end_tags(&st);
                         stack_pop_until(&st, "body");
                         mode = MODE_AFTER_BODY;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "form") == 0 && mode == MODE_IN_BODY) {
+                        if (!in_template_context(&st)) {
+                            node *node_ptr = form_element_pointer;
+                            form_element_pointer = NULL;
+                            int idx;
+                            if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                if (node_ptr == NULL) break;
+                                if (!has_element_in_scope(&st, "form")) break;
+                            }
+                            generate_implied_end_tags(&st);
+                            idx = stack_index_of(&st, node_ptr);
+                            if (idx >= 0) {
+                                stack_remove_at(&st, idx);
+                            }
+                        } else {
+                             if (has_element_in_scope(&st, "form")) {
+                                 generate_implied_end_tags(&st);
+                                 stack_pop_until(&st, "form");
+                             }
+                        }
                         break;
                     }
                     if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
@@ -3074,6 +3243,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
     int template_mode_top = 0;
     text_buffer table_text = {0};
     int table_text_has_non_ws = 0;
+    node *form_element_pointer = NULL;
     node *context = NULL;
 
     if (!doc) return NULL;
@@ -3187,14 +3357,14 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         if (cur && cur->name && !is_table_element(cur->name)) {
                             handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode,
                                                           template_mode_stack, &template_mode_top,
-                                                          DOC_NO_QUIRKS, t.attrs, t.attr_count);
+                                                          DOC_NO_QUIRKS, t.attrs, t.attr_count, &form_element_pointer);
                             break;
                         }
                     }
                     if (mode == MODE_IN_BODY) {
                         handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode,
                                                       template_mode_stack, &template_mode_top,
-                                                      DOC_NO_QUIRKS, t.attrs, t.attr_count);
+                                                      DOC_NO_QUIRKS, t.attrs, t.attr_count, &form_element_pointer);
                         break;
                     }
                     if (mode == MODE_IN_TABLE) {
@@ -3272,6 +3442,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_TABLE_BODY) {
@@ -3318,6 +3491,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_ROW) {
@@ -3352,6 +3528,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             if (!t.self_closing && !is_void_element(t.name)) {
                                 stack_push(&st, n);
                             }
+                            if (is_form_associated_element(t.name) && form_element_pointer && !in_template_context(&st)) {
+                                n->form_owner = form_element_pointer;
+                            }
                             break;
                         }
                     } else if (mode == MODE_IN_CELL) {
@@ -3372,7 +3551,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                         handle_in_body_start_fragment(t.name, t.self_closing, doc, &st, &fmt, &mode,
                                                       template_mode_stack, &template_mode_top,
-                                                      DOC_NO_QUIRKS, t.attrs, t.attr_count);
+                                                      DOC_NO_QUIRKS, t.attrs, t.attr_count, &form_element_pointer);
                     } else if (mode == MODE_IN_CAPTION) {
                         if (t.name && strcmp(t.name, "table") == 0) {
                             stack_pop_until(&st, "caption");
@@ -3438,6 +3617,28 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         break;
                     }
                     /* Dedicated end tag handlers for implied-end-tag elements */
+                    if (t.name && strcmp(t.name, "form") == 0 && mode == MODE_IN_BODY) {
+                        if (!in_template_context(&st)) {
+                            node *node_ptr = form_element_pointer;
+                            form_element_pointer = NULL;
+                            int idx;
+                            if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                if (node_ptr == NULL) break;
+                                if (!has_element_in_scope(&st, "form")) break;
+                            }
+                            generate_implied_end_tags(&st);
+                            idx = stack_index_of(&st, node_ptr);
+                            if (idx >= 0) {
+                                stack_remove_at(&st, idx);
+                            }
+                        } else {
+                             if (has_element_in_scope(&st, "form")) {
+                                 generate_implied_end_tags(&st);
+                                 stack_pop_until(&st, "form");
+                             }
+                        }
+                        break;
+                    }
                     if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
                         if (!has_element_in_button_scope(&st, "p")) {
                             node *parent = current_node(&st, doc);

@@ -317,13 +317,13 @@
 | Foster parenting（非表格內容） | ✅ | |
 | `<select>` in table → `in select in table` | ✅ | |
 | `<form>` in table 特殊處理 | ⬜ | |
-| In table text 收集模式 | ⬜ | 未在表格模式中緩衝文字 |
+| In table text 收集模式 | ✅ | 表格模式中緩衝文字，非空白 foster parent |
 
 ### 6.4 Form 相關
 
 | 功能 | 狀態 | 備註 |
 |------|------|------|
-| `<form>` element pointer | ⬜ | WHATWG 維護的 "form element pointer" |
+| `<form>` element pointer | ✅ | WHATWG 維護的 "form element pointer"；form-associated 元素自動關聯 |
 | `<input>` / `<button>` / `<select>` / `<textarea>` 基本解析 | ✅ | |
 | `<input>` type=hidden 在 table 中的特殊處理 | ⬜ | |
 
@@ -418,5 +418,5 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 7. **Noah's Ark attribute 比對** — 完成（tag+attrs 去重；新增壓力測試 `tests/formatting_noahs_ark.html`）
 7. **Noah's Ark attribute 比對** — 精確度提升
 8. **`in table text` 模式** — 完成（新增 pending text 收集 + foster；測資 `tests/table_text_mode.html`）
-9. **`<form>` element pointer** — 表單相關場景
+9. **`<form>` element pointer** — ✅ 完成（form_element_pointer 追蹤 + form_owner 關聯；測資 `tests/form_test.html`）
 10. **完整 parse error 報告** — 系統性驗證
