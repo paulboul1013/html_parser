@@ -145,7 +145,7 @@
 | in body | ✅ | |
 | text | ⬜ | WHATWG 定義的 generic RCDATA/RAWTEXT 內容模式 |
 | in table | ✅ | |
-| in table text | ⬜ | 表格內文字的特殊收集模式 |
+| in table text | ✅ | 表格內文字特殊收集 + foster 規則 |
 | in caption | ✅ | |
 | in column group | 🔧 | `<colgroup>` / `<col>` 可解析但無獨立狀態 |
 | in table body | ✅ | |
@@ -160,7 +160,7 @@
 | after after body | ✅ | |
 | after after frameset | ⬜ | |
 
-**小結**：23 種模式中 13 種完整實作，4 種以合併方式實作（功能等效），6 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in table text、in head noscript、text）。
+**小結**：23 種模式中 14 種完整實作，4 種以合併方式實作（功能等效），5 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in head noscript、text）。
 
 ### 2.2 Tree Construction 演算法
 
@@ -417,6 +417,6 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 6. **Numeric reference 範圍修正表** — 完成（加入 Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD；新增測資 `tests/numeric_reference_corrections.html`）
 7. **Noah's Ark attribute 比對** — 完成（tag+attrs 去重；新增壓力測試 `tests/formatting_noahs_ark.html`）
 7. **Noah's Ark attribute 比對** — 精確度提升
-8. **`in table text` 模式** — 表格內文字的精確處理
+8. **`in table text` 模式** — 完成（新增 pending text 收集 + foster；測資 `tests/table_text_mode.html`）
 9. **`<form>` element pointer** — 表單相關場景
 10. **完整 parse error 報告** — 系統性驗證

@@ -94,7 +94,8 @@ EOF
 # 03  Foster parenting
 #     <table> must switch insertion mode to "in table".
 #     Text "1" and element <p> are then foster-parented before
-#     the <table>.  Text "2" goes inside the foster-parented <p>.
+#     the <table>.  Text "2" is table text and is foster-parented
+#     before the <table> as a sibling (not inside <p>).
 # ----------------------------------------------------------------
 run "03  foster parenting (text + p inside table)" \
     div tests/frag_03_foster_in_div.html pass <<'EOF'
@@ -102,7 +103,7 @@ ASCII Tree (Fragment)
 DOCUMENT
 |-- TEXT data="1"
 |-- ELEMENT name="p"
-|   \-- TEXT data="2"
+|-- TEXT data="2"
 |-- ELEMENT name="table"
 \-- TEXT data="3"
 EOF

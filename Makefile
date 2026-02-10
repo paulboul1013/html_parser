@@ -64,6 +64,7 @@ test-html: parse_html
 	./parse_html tests/formatting_noahs_ark_stress.html
 	./parse_html tests/formatting_noahs_ark_reconstruct.html
 	./parse_html tests/formatting_noahs_ark_effect.html
+	./parse_html tests/table_text_mode.html
 	./parse_html tests/formatting_noahs_ark.html
 
 test-fragment: parse_fragment_demo

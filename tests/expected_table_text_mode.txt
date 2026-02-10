@@ -1,0 +1,11 @@
+--- tests/table_text_mode.html ---
+DOCUMENT
+|-- DOCTYPE name="html"
+\-- ELEMENT name="html"
+    \-- ELEMENT name="body"
+        |-- TEXT data=" A"
+        |-- ELEMENT name="table"
+        |   \-- ELEMENT name="tr"
+        |       \-- ELEMENT name="td"
+        |           \-- TEXT data="X"
+        \-- TEXT data=" B"
