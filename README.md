@@ -122,7 +122,7 @@
 | 缺口 | 影響範圍 | 說明 |
 |------|---------|------|
 | **Foreign Content（SVG / MathML）** | 中 | 缺少命名空間切換、Integration Points、外國元素自閉合。SVG/MathML 被視為普通 HTML 元素。 |
-| **`<template>` 的 Document Fragment** | 低 | `<template>` 可解析但未隔離其 content 到獨立 DocumentFragment。 |
+| **`<template>` 的 Document Fragment** | 低 | ✅ 已支援 `content` wrapper（序列化時跳過 wrapper）。 |
 | **完整 Parser Error Recovery** | 低 | 大部分 Error Case 已隱式處理（忽略/容錯），但未系統性驗證每一個 WHATWG 定義的 parse error 分支。 |
 | **Scripting / `document.write()`** | N/A | 這是純 Parser，不執行 JavaScript，無法處理 Re-entrant Parsing。 |
 | **`<form>` 元素指標** | 低 | 未維護 WHATWG 定義的 "form element pointer"，不影響大多數場景。 |

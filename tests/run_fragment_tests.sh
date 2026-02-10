@@ -206,7 +206,7 @@ EOF
 # 10  <template> content DocumentFragment
 #     Per spec the children of <template> live inside a
 #     DocumentFragment accessed via .content.
-#     This parser does not yet model template content ->  KNOWN.
+#     This parser models template content via a "content" wrapper node.
 # ----------------------------------------------------------------
 run "10  template content DocumentFragment" \
     div tests/frag_10_template.html pass <<'EOF'

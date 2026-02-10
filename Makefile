@@ -56,6 +56,7 @@ test-html: parse_html
 	./parse_html tests/mathml_basic.html
 	./parse_html tests/svg_cdata.html
 	./parse_html tests/svg_nested.html
+	./parse_html tests/template_document.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

@@ -337,24 +337,37 @@ static void serialize_node(const node *n, string_buffer *sb, const char *parent_
             sb_append(sb, ">");
 
             /* Children (with context-aware escaping) */
-            int is_raw = is_raw_text_element(n->name);
-            int is_rcdata = is_rcdata_element(n->name);
-
-            for (const node *child = n->first_child; child; child = child->next_sibling) {
-                if (child->type == NODE_TEXT && (is_raw || is_rcdata)) {
-                    /* Raw text: no escaping for script/style */
-                    /* RCDATA: escape for textarea/title */
-                    if (is_raw) {
-                        sb_append(sb, child->data ? child->data : "");
-                    } else {
-                        char *escaped = escape_html_text(child->data);
-                        if (escaped) {
-                            sb_append(sb, escaped);
-                            free(escaped);
+            if (n->name && strcmp(n->name, "template") == 0) {
+                for (const node *child = n->first_child; child; child = child->next_sibling) {
+                    if (child->type == NODE_ELEMENT && child->name &&
+                        strcmp(child->name, "content") == 0) {
+                        for (const node *gc = child->first_child; gc; gc = gc->next_sibling) {
+                            serialize_node(gc, sb, n->name);
                         }
+                    } else {
+                        serialize_node(child, sb, n->name);
                     }
-                } else {
-                    serialize_node(child, sb, n->name);
+                }
+            } else {
+                int is_raw = is_raw_text_element(n->name);
+                int is_rcdata = is_rcdata_element(n->name);
+
+                for (const node *child = n->first_child; child; child = child->next_sibling) {
+                    if (child->type == NODE_TEXT && (is_raw || is_rcdata)) {
+                        /* Raw text: no escaping for script/style */
+                        /* RCDATA: escape for textarea/title */
+                        if (is_raw) {
+                            sb_append(sb, child->data ? child->data : "");
+                        } else {
+                            char *escaped = escape_html_text(child->data);
+                            if (escaped) {
+                                sb_append(sb, escaped);
+                                free(escaped);
+                            }
+                        }
+                    } else {
+                        serialize_node(child, sb, n->name);
+                    }
                 }
             }
 

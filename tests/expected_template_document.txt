@@ -1,0 +1,17 @@
+--- tests/template_document.html ---
+DOCUMENT
+|-- DOCTYPE name="html"
+\-- ELEMENT name="html"
+    |-- ELEMENT name="head"
+    |   \-- ELEMENT name="title"
+    |       \-- TEXT data="T"
+    \-- ELEMENT name="body"
+        |-- ELEMENT name="template" [id="t"]
+        |   \-- ELEMENT name="content"
+        |       |-- ELEMENT name="p"
+        |       |   \-- TEXT data="A"
+        |       \-- ELEMENT name="div"
+        |           \-- ELEMENT name="span"
+        |               \-- TEXT data="B"
+        \-- ELEMENT name="p"
+            \-- TEXT data="C"

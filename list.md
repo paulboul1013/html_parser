@@ -153,14 +153,14 @@
 | in cell | ✅ | |
 | in select | ✅ | |
 | in select in table | ✅ | |
-| in template | ⬜ | `<template>` 的 Document Fragment 隔離 |
+| in template | 🔧 | 以 `template_mode_stack` + `content` wrapper 簡化實作 |
 | after body | ✅ | |
 | in frameset | ⬜ | `<frameset>` 模式，已淘汰 |
 | after frameset | ⬜ | |
 | after after body | ✅ | |
 | after after frameset | ⬜ | |
 
-**小結**：23 種模式中 13 種完整實作，3 種以合併方式實作（功能等效），7 種未實作。未實作的多為罕用（frameset × 3）或進階功能（template、in table text、in head noscript、text）。
+**小結**：23 種模式中 13 種完整實作，4 種以合併方式實作（功能等效），6 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in table text、in head noscript、text）。
 
 ### 2.2 Tree Construction 演算法
 
@@ -190,7 +190,7 @@
 | Noah's Ark clause（同元素限制 3 筆） | ✅ | |
 | Marker 推入（`td` / `th` / `caption`） | ✅ | |
 | Marker 推入（`applet` / `marquee` / `object`） | ⬜ | |
-| Marker 推入（`template`） | ⬜ | |
+| Marker 推入（`template`） | ✅ | |
 | Clear to marker | ✅ | |
 | Adoption Agency outer loop（8 次上限） | ✅ | |
 | Adoption Agency inner loop（8 次上限） | ✅ | |
@@ -245,7 +245,7 @@
 | Context element 決定 insertion mode | ✅ | |
 | Context element 不出現在輸出 | ✅ | |
 | `<html>` 作為 context：form element pointer 設定 | ⬜ | |
-| `<template>` 作為 context：template insertion modes stack | ⬜ | |
+| `<template>` 作為 context：template insertion modes stack | ✅ | `context=template` 會建立 `content` wrapper |
 | Context element 的 encoding 繼承 | ⬜ | |
 
 ---
@@ -283,7 +283,7 @@
 | 屬性值 `&amp;`/`&quot;` | ✅ | |
 | Comment 序列化 `<!--...-->` | ✅ | |
 | DOCTYPE 序列化 | ✅ | |
-| `<template>` content 序列化 | ⬜ | 無 Document Fragment 隔離 |
+| `<template>` content 序列化 | ✅ | `content` wrapper 不輸出 |
 | Attribute 排序（規範未強制） | ⬜ | 保留解析順序 |
 | Boolean attributes | ✅ | 空字串值 |
 
@@ -355,9 +355,9 @@
 | 功能 | 狀態 | 備註 |
 |------|------|------|
 | `<template>` 基本解析 | ✅ | 作為普通元素 |
-| Template contents（Document Fragment） | ⬜ | |
-| Template insertion modes stack | ⬜ | |
-| `</template>` 正確 pop | ⬜ | |
+| Template contents（Document Fragment） | ✅ | 以 `content` wrapper 表示 |
+| Template insertion modes stack | 🔧 | 進入 template push mode；內容以 `MODE_IN_BODY` 解析 |
+| `</template>` 正確 pop | ✅ | |
 
 ---
 
@@ -392,16 +392,16 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 |------|--------|---------|--------|--------|
 | Tokenizer 狀態（80） | ~48 | ~16 | ~3 | ~80% |
 | Character References | 5/7 | 0 | 2 | 71% |
-| Insertion Modes（23） | 13 | 3 | 7 | ~70% |
+| Insertion Modes（23） | 13 | 4 | 6 | ~74% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
-| Formatting / AFE | 8/10 | 0 | 2 | 80% |
+| Formatting / AFE | 9/10 | 0 | 1 | 90% |
 | Scope | 4/6 | 0 | 2 | 67% |
 | Auto-close | 10/11 | 0 | 1 | 91% |
-| Fragment Parsing | 4/7 | 0 | 3 | 57% |
+| Fragment Parsing | 5/7 | 0 | 2 | 71% |
 | Encoding Sniffing | 12/14 | 0 | 2 | 86% |
-| Serialization | 9/11 | 0 | 2 | 82% |
+| Serialization | 10/11 | 0 | 1 | 91% |
 | Foreign Content | 9/9 | 0 | 0 | 100% |
-| Template | 1/4 | 0 | 3 | 25% |
+| Template | 3/4 | 1 | 0 | ~90% |
 
 ### 整體評估
 
@@ -410,7 +410,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 ### 優先建議（按影響度排序）
 
-1. **`<template>` Document Fragment** — 現代前端框架廣泛使用
+1. **`<template>` Document Fragment** — ✅ 已完成
 2. **Heading auto-close（`<h1>`-`<h6>`）** — 低成本修正
 4. **Marker 補充（`applet` / `marquee` / `object`）** — 低成本修正
 5. **CR/LF 正規化** — 輸入前處理
