@@ -1081,36 +1081,66 @@ done:
 
 char *tokenizer_replace_nulls(const char *raw, size_t raw_len) {
     if (!raw || raw_len == 0) return dup_string("");
-    /* Count NULL bytes to compute output size */
+
+    /* First pass: compute output length after NULL replacement and CR/LF normalization */
+    size_t out_len = 0;
     size_t null_count = 0;
     for (size_t i = 0; i < raw_len; i++) {
-        if (raw[i] == '\0') null_count++;
+        unsigned char c = (unsigned char)raw[i];
+        if (c == '\0') {
+            null_count++;
+            out_len += 3; /* U+FFFD UTF-8 */
+        } else if (c == '\r') {
+            /* CRLF collapses to single LF */
+            if (i + 1 < raw_len && raw[i + 1] == '\n') {
+                i++; /* skip LF */
+            }
+            out_len += 1; /* normalized LF */
+        } else {
+            out_len += 1;
+        }
     }
-    if (null_count == 0) {
-        /* No NULLs — just duplicate */
+
+    if (null_count == 0 && out_len == raw_len) {
+        /* No changes needed */
         char *out = (char *)malloc(raw_len + 1);
         if (!out) return NULL;
         memcpy(out, raw, raw_len);
         out[raw_len] = '\0';
         return out;
     }
-    /* Each NULL (1 byte) becomes U+FFFD UTF-8 (3 bytes): net +2 per NULL */
-    size_t out_len = raw_len + null_count * 2;
+
     char *out = (char *)malloc(out_len + 1);
     if (!out) return NULL;
+
     size_t j = 0;
     size_t line = 1, col = 1;
     for (size_t i = 0; i < raw_len; i++) {
-        if (raw[i] == '\0') {
+        unsigned char c = (unsigned char)raw[i];
+        if (c == '\0') {
             printf("[parse error] line=%zu col=%zu: unexpected null character\n", line, col);
             out[j++] = (char)0xEF;
             out[j++] = (char)0xBF;
             out[j++] = (char)0xBD;
             col++;
+            continue;
+        }
+        if (c == '\r') {
+            /* Normalize CR and CRLF to LF */
+            if (i + 1 < raw_len && raw[i + 1] == '\n') {
+                i++; /* consume LF partner */
+            }
+            out[j++] = '\n';
+            line++;
+            col = 1;
+            continue;
+        }
+        out[j++] = (char)c;
+        if (c == '\n') {
+            line++;
+            col = 1;
         } else {
-            if (raw[i] == '\n') { line++; col = 1; }
-            else { col++; }
-            out[j++] = raw[i];
+            col++;
         }
     }
     out[j] = '\0';

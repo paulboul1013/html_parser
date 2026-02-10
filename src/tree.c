@@ -149,6 +149,15 @@ static const char *node_type_name(node_type t) {
     }
 }
 
+static void print_escaped(const char *s) {
+    if (!s) return;
+    for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+        if (*p == '\n') { printf("\\n"); continue; }
+        if (*p == '\r') { printf("\\r"); continue; }
+        printf("%c", *p);
+    }
+}
+
 static void dump_node(const node *n, const char *prefix, int is_last) {
     char next_prefix[512];
     const char *branch = is_last ? "\\-- " : "|-- ";
@@ -157,7 +166,11 @@ static void dump_node(const node *n, const char *prefix, int is_last) {
     if (n->ns == NS_SVG) printf("(svg)");
     else if (n->ns == NS_MATHML) printf("(math)");
     if (n->name) printf(" name=\"%s\"", n->name);
-    if (n->data) printf(" data=\"%s\"", n->data);
+    if (n->data) {
+        printf(" data=\"");
+        print_escaped(n->data);
+        printf("\"");
+    }
     if (n->attr_count > 0) {
         printf(" [");
         for (size_t i = 0; i < n->attr_count; ++i) {

@@ -125,7 +125,7 @@
 | 功能 | 狀態 | 備註 |
 |------|------|------|
 | NULL 字元替換（U+0000 → U+FFFD） | ✅ | `tokenizer_replace_nulls()` |
-| CR/LF 正規化（CR → LF, CRLF → LF） | ⬜ | WHATWG §13.2.3.5 要求 |
+| CR/LF 正規化（CR → LF, CRLF → LF） | ✅ | `tokenizer_replace_nulls()` 前處理 |
 | Encoding sniffing | ✅ | 見下方「Encoding」章節 |
 
 ---

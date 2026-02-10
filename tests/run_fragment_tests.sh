@@ -258,6 +258,22 @@ DOCUMENT
 EOF
 
 # ----------------------------------------------------------------
+# 13  CR/LF normalization
+#     CR and CRLF must be normalized to LF before tokenization.
+# ----------------------------------------------------------------
+tmp_crlf=$(mktemp)
+printf 'A\r\nB\rC' > "$tmp_crlf"
+run "13  CR/LF normalization" \
+    div "$tmp_crlf" pass <<'EOF'
+ASCII Tree (Fragment)
+DOCUMENT
+\-- TEXT data="A
+B
+C"
+EOF
+rm -f "$tmp_crlf"
+
+# ----------------------------------------------------------------
 # summary
 # ----------------------------------------------------------------
 echo "  =============================="
