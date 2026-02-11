@@ -67,6 +67,9 @@ test-html: parse_html
 	./parse_html tests/table_text_mode.html
 	./parse_html tests/formatting_noahs_ark.html
 	./parse_html tests/form_test.html
+	./parse_html tests/plaintext.html
+	./parse_html tests/plaintext_in_p.html
+	./parse_html tests/script_states.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

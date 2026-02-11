@@ -1103,6 +1103,7 @@ static int is_body_block_like_start(const char *name) {
            strcmp(name, "nav") == 0 ||
            strcmp(name, "ol") == 0 ||
            strcmp(name, "p") == 0 ||
+           strcmp(name, "plaintext") == 0 ||
            strcmp(name, "pre") == 0 ||
            strcmp(name, "section") == 0 ||
            strcmp(name, "table") == 0 ||

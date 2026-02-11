@@ -18,7 +18,7 @@
 | Script data state | ✅ | |
 | Script data escaped state | ✅ | `<!--` 偵測 |
 | Script data double escaped state | ✅ | |
-| PLAINTEXT state | ⬜ | `<plaintext>` 觸發，極罕見 |
+| PLAINTEXT state | ✅ | `<plaintext>` 觸發，進入後不可離開 |
 | Tag open state | ✅ | |
 | End tag open state | ✅ | |
 | Tag name state | ✅ | |
@@ -71,23 +71,23 @@
 | Hexadecimal character reference state | ✅ | |
 | Decimal character reference state | ✅ | |
 | Numeric character reference end state | ✅ | |
-| Script data less-than sign state | 🔧 | 以 marker-based 方式實作 |
-| Script data end tag open state | 🔧 | |
-| Script data end tag name state | 🔧 | |
-| Script data escape start state | 🔧 | |
-| Script data escape start dash state | 🔧 | |
+| Script data less-than sign state | ✅ | `process_script_data()` 逐字元狀態機 |
+| Script data end tag open state | ✅ | |
+| Script data end tag name state | ✅ | |
+| Script data escape start state | ✅ | |
+| Script data escape start dash state | ✅ | |
 | Script data escaped state | ✅ | |
-| Script data escaped dash state | 🔧 | |
-| Script data escaped dash dash state | 🔧 | |
-| Script data escaped less-than sign state | 🔧 | |
-| Script data escaped end tag open state | 🔧 | |
-| Script data escaped end tag name state | 🔧 | |
-| Script data double escape start state | 🔧 | |
+| Script data escaped dash state | ✅ | |
+| Script data escaped dash dash state | ✅ | |
+| Script data escaped less-than sign state | ✅ | |
+| Script data escaped end tag open state | ✅ | |
+| Script data escaped end tag name state | ✅ | |
+| Script data double escape start state | ✅ | |
 | Script data double escaped state | ✅ | |
-| Script data double escaped dash state | 🔧 | |
-| Script data double escaped dash dash state | 🔧 | |
-| Script data double escaped less-than sign state | 🔧 | |
-| Script data double escape end state | 🔧 | |
+| Script data double escaped dash state | ✅ | |
+| Script data double escaped dash dash state | ✅ | |
+| Script data double escaped less-than sign state | ✅ | |
+| Script data double escape end state | ✅ | |
 | RCDATA less-than sign state | 🔧 | 用 `find_end_tag()` 替代狀態機 |
 | RCDATA end tag open state | 🔧 | |
 | RCDATA end tag name state | 🔧 | |
@@ -95,7 +95,7 @@
 | RAWTEXT end tag open state | 🔧 | |
 | RAWTEXT end tag name state | 🔧 | |
 
-**小結**：80 個狀態中 ~48 個完整實作，~16 個用替代方式實作（功能等效），~1 個未實作（PLAINTEXT）。CDATA 已透過 `allow_cdata` flag 實作。RCDATA/RAWTEXT/Script 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
+**小結**：80 個狀態中 ~64 個完整實作，~6 個用替代方式實作（功能等效），0 個未實作。Script data 的 18 個子狀態已透過 `process_script_data()` 逐字元狀態機完整實作。CDATA 已透過 `allow_cdata` flag 實作。PLAINTEXT 已實作（進入後永不離開）。RCDATA/RAWTEXT 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
 
 ### 1.2 Character References
 
@@ -390,7 +390,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 | 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
 |------|--------|---------|--------|--------|
-| Tokenizer 狀態（80） | ~48 | ~16 | ~1 | ~95% |
+| Tokenizer 狀態（80） | ~64 | ~6 | 0 | ~98% |
 | Character References | 6/7 | 0 | 1 | 86% |
 | Insertion Modes（23） | 15 | 4 | 4 | ~83% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
@@ -420,6 +420,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 7. ✅ **`in table text` 模式** — pending text 收集 + foster
 8. ✅ **`<form>` element pointer** — form_element_pointer 追蹤 + form_owner 關聯
 9. ✅ **Foreign Content（SVG/MathML）** — 命名空間、Integration Points、CDATA、大小寫修正
+10. ✅ **PLAINTEXT state** — 進入後永不離開，所有後續輸入為文字
+11. ✅ **Script data 完整狀態機** — `process_script_data()` 逐字元實作 18 個子狀態（WHATWG §13.2.5.4–§13.2.5.20）
 
 ### 剩餘待完成項目
 

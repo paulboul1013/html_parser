@@ -1,9 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
 #include "tokenizer.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>  /* strcasecmp */
 
 static int is_ascii_whitespace(char c) {
     return c == ' ' || c == '\n' || c == '\t' || c == '\f' || c == '\r';
@@ -482,52 +484,206 @@ static size_t find_end_tag(const tokenizer *tz, const char *tag) {
     return tz->len;
 }
 
-typedef enum {
-    SCRIPT_MARK_NONE = 0,
-    SCRIPT_MARK_ENDSCRIPT,
-    SCRIPT_MARK_OPEN_COMMENT,
-    SCRIPT_MARK_CLOSE_COMMENT
-} script_marker_kind;
+/* ── Script data state machine (WHATWG §13.2.5.4–§13.2.5.20) ────────────────
+ *
+ * Scans script content character-by-character, tracking all 17 sub-states.
+ * Emits accumulated characters as a single CHARACTER token.
+ *
+ * Returns 1 if a CHARACTER token was emitted (caller should return).
+ * Returns 0 if state was set to TOKENIZE_DATA with no emission (caller
+ *            should continue the loop so DATA state parses the </script>).
+ */
+static int process_script_data(tokenizer *tz, token *out) {
+    enum {
+        S_DATA,                   S_DATA_LT,                S_DATA_END_OPEN,
+        S_DATA_END_NAME,          S_ESCAPE_START,            S_ESCAPE_START_DASH,
+        S_ESCAPED,                S_ESCAPED_DASH,            S_ESCAPED_DASH_DASH,
+        S_ESCAPED_LT,            S_ESCAPED_END_OPEN,        S_ESCAPED_END_NAME,
+        S_DBL_ESCAPE_START,
+        S_DBL_ESCAPED,            S_DBL_ESCAPED_DASH,        S_DBL_ESCAPED_DASH_DASH,
+        S_DBL_ESCAPED_LT,        S_DBL_ESCAPE_END
+    };
 
-static size_t find_script_marker(const tokenizer *tz, script_marker_kind *kind) {
-    size_t i = tz->pos;
-    size_t best_pos = tz->len;
-    script_marker_kind best_kind = SCRIPT_MARK_NONE;
+    int ss;
+    if      (tz->state == TOKENIZE_SCRIPT_DATA_ESCAPED)        ss = S_ESCAPED;
+    else if (tz->state == TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED) ss = S_DBL_ESCAPED;
+    else                                                        ss = S_DATA;
 
-    /* Always look for </script */
-    size_t end_pos = find_end_tag(tz, "script");
-    if (end_pos < best_pos) {
-        best_pos = end_pos;
-        best_kind = SCRIPT_MARK_ENDSCRIPT;
+    size_t start = tz->pos;
+    char   tmp[16];
+    int    tmp_len = 0;
+    size_t lt_pos  = 0;            /* position of the '<' that started a potential end tag */
+
+    while (tz->pos < tz->len) {
+        char c = tz->input[tz->pos];
+
+        switch (ss) {
+
+        /* ── Script data ────────────────────────────────────────────────── */
+        case S_DATA:
+            if (c == '<') { lt_pos = tz->pos; ss = S_DATA_LT; }
+            tz->pos++;
+            break;
+
+        case S_DATA_LT:
+            if (c == '/') { ss = S_DATA_END_OPEN; tmp_len = 0; tz->pos++; }
+            else if (c == '!') { ss = S_ESCAPE_START; tz->pos++; }
+            else { ss = S_DATA; /* reconsume */ }
+            break;
+
+        case S_DATA_END_OPEN:
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                ss = S_DATA_END_NAME; tmp_len = 0; /* reconsume */
+            } else { ss = S_DATA; /* reconsume */ }
+            break;
+
+        case S_DATA_END_NAME:
+            if (is_ascii_whitespace(c) || c == '/' || c == '>') {
+                tmp[tmp_len] = '\0';
+                if (tmp_len > 0 && strcasecmp(tmp, tz->raw_tag) == 0) {
+                    /* Appropriate end tag found → emit chars up to '<' */
+                    tz->pos = lt_pos;
+                    tz->state = TOKENIZE_DATA;
+                    if (tz->pos > start) {
+                        out->type = TOKEN_CHARACTER;
+                        out->data = substr_dup(tz->input, start, tz->pos);
+                        return 1;
+                    }
+                    return 0; /* no chars; let DATA state parse end tag */
+                }
+                ss = S_DATA; /* not the right tag */
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                if (tmp_len < 15) tmp[tmp_len++] = to_lower_ascii(c);
+                else { ss = S_DATA; break; }
+                tz->pos++;
+            } else { ss = S_DATA; /* reconsume */ }
+            break;
+
+        case S_ESCAPE_START:
+            if (c == '-') { ss = S_ESCAPE_START_DASH; tz->pos++; }
+            else { ss = S_DATA; /* reconsume */ }
+            break;
+
+        case S_ESCAPE_START_DASH:
+            if (c == '-') { ss = S_ESCAPED_DASH_DASH; tz->pos++; }
+            else { ss = S_DATA; /* reconsume */ }
+            break;
+
+        /* ── Script data escaped ────────────────────────────────────────── */
+        case S_ESCAPED:
+            if      (c == '-') { ss = S_ESCAPED_DASH; tz->pos++; }
+            else if (c == '<') { lt_pos = tz->pos; ss = S_ESCAPED_LT; tz->pos++; }
+            else { tz->pos++; }
+            break;
+
+        case S_ESCAPED_DASH:
+            if      (c == '-') { ss = S_ESCAPED_DASH_DASH; tz->pos++; }
+            else if (c == '<') { lt_pos = tz->pos; ss = S_ESCAPED_LT; tz->pos++; }
+            else { ss = S_ESCAPED; tz->pos++; }
+            break;
+
+        case S_ESCAPED_DASH_DASH:
+            if      (c == '-') { tz->pos++; /* stay */ }
+            else if (c == '<') { lt_pos = tz->pos; ss = S_ESCAPED_LT; tz->pos++; }
+            else if (c == '>') { ss = S_DATA; tz->pos++; }    /* --> exits escaped */
+            else { ss = S_ESCAPED; tz->pos++; }
+            break;
+
+        case S_ESCAPED_LT:
+            if (c == '/') { ss = S_ESCAPED_END_OPEN; tmp_len = 0; tz->pos++; }
+            else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                ss = S_DBL_ESCAPE_START; tmp_len = 0; /* reconsume */
+            } else { ss = S_ESCAPED; /* reconsume */ }
+            break;
+
+        case S_ESCAPED_END_OPEN:
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                ss = S_ESCAPED_END_NAME; tmp_len = 0; /* reconsume */
+            } else { ss = S_ESCAPED; /* reconsume */ }
+            break;
+
+        case S_ESCAPED_END_NAME:
+            if (is_ascii_whitespace(c) || c == '/' || c == '>') {
+                tmp[tmp_len] = '\0';
+                if (tmp_len > 0 && strcasecmp(tmp, tz->raw_tag) == 0) {
+                    tz->pos = lt_pos;
+                    tz->state = TOKENIZE_DATA;
+                    if (tz->pos > start) {
+                        out->type = TOKEN_CHARACTER;
+                        out->data = substr_dup(tz->input, start, tz->pos);
+                        return 1;
+                    }
+                    return 0;
+                }
+                ss = S_ESCAPED;
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                if (tmp_len < 15) tmp[tmp_len++] = to_lower_ascii(c);
+                else { ss = S_ESCAPED; break; }
+                tz->pos++;
+            } else { ss = S_ESCAPED; /* reconsume */ }
+            break;
+
+        case S_DBL_ESCAPE_START:
+            if (is_ascii_whitespace(c) || c == '/' || c == '>') {
+                tmp[tmp_len] = '\0';
+                ss = (tmp_len == 6 && strcasecmp(tmp, "script") == 0)
+                     ? S_DBL_ESCAPED : S_ESCAPED;
+                tz->pos++;
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                if (tmp_len < 15) tmp[tmp_len++] = to_lower_ascii(c);
+                else { ss = S_ESCAPED; break; }
+                tz->pos++;
+            } else { ss = S_ESCAPED; /* reconsume */ }
+            break;
+
+        /* ── Script data double escaped ─────────────────────────────────── */
+        case S_DBL_ESCAPED:
+            if      (c == '-') { ss = S_DBL_ESCAPED_DASH; tz->pos++; }
+            else if (c == '<') { ss = S_DBL_ESCAPED_LT; tz->pos++; }
+            else { tz->pos++; }
+            break;
+
+        case S_DBL_ESCAPED_DASH:
+            if      (c == '-') { ss = S_DBL_ESCAPED_DASH_DASH; tz->pos++; }
+            else if (c == '<') { ss = S_DBL_ESCAPED_LT; tz->pos++; }
+            else { ss = S_DBL_ESCAPED; tz->pos++; }
+            break;
+
+        case S_DBL_ESCAPED_DASH_DASH:
+            if      (c == '-') { tz->pos++; /* stay */ }
+            else if (c == '<') { ss = S_DBL_ESCAPED_LT; tz->pos++; }
+            else if (c == '>') { ss = S_DATA; tz->pos++; }  /* --> exits to script data */
+            else { ss = S_DBL_ESCAPED; tz->pos++; }
+            break;
+
+        case S_DBL_ESCAPED_LT:
+            if (c == '/') { ss = S_DBL_ESCAPE_END; tmp_len = 0; tz->pos++; }
+            else { ss = S_DBL_ESCAPED; /* reconsume */ }
+            break;
+
+        case S_DBL_ESCAPE_END:
+            if (is_ascii_whitespace(c) || c == '/' || c == '>') {
+                tmp[tmp_len] = '\0';
+                ss = (tmp_len == 6 && strcasecmp(tmp, "script") == 0)
+                     ? S_ESCAPED : S_DBL_ESCAPED;
+                tz->pos++;
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                if (tmp_len < 15) tmp[tmp_len++] = to_lower_ascii(c);
+                else { ss = S_DBL_ESCAPED; break; }
+                tz->pos++;
+            } else { ss = S_DBL_ESCAPED; /* reconsume */ }
+            break;
+        }
     }
 
-    /* In escaped modes, recognize comment open/close markers */
-    if (tz->state == TOKENIZE_SCRIPT_DATA || tz->state == TOKENIZE_SCRIPT_DATA_ESCAPED || tz->state == TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED) {
-        while (i + 3 < tz->len) {
-            if (tz->input[i] == '<' && tz->input[i + 1] == '!' && tz->input[i + 2] == '-' && tz->input[i + 3] == '-') {
-                if (i < best_pos) {
-                    best_pos = i;
-                    best_kind = SCRIPT_MARK_OPEN_COMMENT;
-                }
-                break;
-            }
-            i++;
-        }
-        i = tz->pos;
-        while (i + 2 < tz->len) {
-            if (tz->input[i] == '-' && tz->input[i + 1] == '-' && tz->input[i + 2] == '>') {
-                if (i < best_pos) {
-                    best_pos = i;
-                    best_kind = SCRIPT_MARK_CLOSE_COMMENT;
-                }
-                break;
-            }
-            i++;
-        }
+    /* Reached EOF — emit any accumulated characters, switch to DATA */
+    tz->state = TOKENIZE_DATA;
+    if (tz->pos > start) {
+        out->type = TOKEN_CHARACTER;
+        out->data = substr_dup(tz->input, start, tz->pos);
+        return 1;
     }
-
-    if (kind) *kind = best_kind;
-    return best_pos;
+    return 0;
 }
 
 static void enter_raw_state(tokenizer *tz, const char *tag, tokenizer_state state) {
@@ -1122,6 +1278,8 @@ done:
             enter_raw_state(tz, out->name, TOKENIZE_SCRIPT_DATA);
         } else if (strcmp(out->name, "style") == 0) {
             enter_raw_state(tz, out->name, TOKENIZE_RAWTEXT);
+        } else if (strcmp(out->name, "plaintext") == 0) {
+            tz->state = TOKENIZE_PLAINTEXT;
         }
     }
 }
@@ -1243,47 +1401,20 @@ void tokenizer_next(tokenizer *tz, token *out) {
     }
 
     while (tz->state != TOKENIZE_DATA) {
-        if (tz->state == TOKENIZE_SCRIPT_DATA || tz->state == TOKENIZE_SCRIPT_DATA_ESCAPED || tz->state == TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED) {
-            script_marker_kind mk = SCRIPT_MARK_NONE;
-            size_t pos = find_script_marker(tz, &mk);
-            if (pos > tz->pos) {
-                out->type = TOKEN_CHARACTER;
-                out->data = substr_dup(tz->input, tz->pos, pos);
-                advance(tz, pos - tz->pos);
+        /* PLAINTEXT: emit all remaining input as one CHARACTER token; no end tag */
+        if (tz->state == TOKENIZE_PLAINTEXT) {
+            if (tz->pos >= tz->len) {
+                out->type = TOKEN_EOF;
                 return;
             }
-            if (mk == SCRIPT_MARK_ENDSCRIPT && pos == tz->pos) {
-                tz->state = TOKENIZE_DATA;
-                continue;
-            }
-            if (mk == SCRIPT_MARK_OPEN_COMMENT && pos == tz->pos) {
-                out->type = TOKEN_CHARACTER;
-                out->data = substr_dup(tz->input, tz->pos, tz->pos + 4);
-                advance(tz, 4);
-                if (tz->state == TOKENIZE_SCRIPT_DATA) {
-                    tz->state = TOKENIZE_SCRIPT_DATA_ESCAPED;
-                } else if (tz->state == TOKENIZE_SCRIPT_DATA_ESCAPED) {
-                    tz->state = TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED;
-                }
-                return;
-            }
-            if (mk == SCRIPT_MARK_CLOSE_COMMENT && pos == tz->pos) {
-                out->type = TOKEN_CHARACTER;
-                out->data = substr_dup(tz->input, tz->pos, tz->pos + 3);
-                advance(tz, 3);
-                if (tz->state == TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED) {
-                    tz->state = TOKENIZE_SCRIPT_DATA_ESCAPED;
-                } else {
-                    tz->state = TOKENIZE_SCRIPT_DATA;
-                }
-                return;
-            }
-            /* fallback: emit remaining */
             out->type = TOKEN_CHARACTER;
             out->data = substr_dup(tz->input, tz->pos, tz->len);
             advance(tz, tz->len - tz->pos);
-            tz->state = TOKENIZE_DATA;
             return;
+        }
+        if (tz->state == TOKENIZE_SCRIPT_DATA || tz->state == TOKENIZE_SCRIPT_DATA_ESCAPED || tz->state == TOKENIZE_SCRIPT_DATA_DOUBLE_ESCAPED) {
+            if (process_script_data(tz, out)) return;
+            continue; /* state is now DATA; loop exits, DATA parsing handles end tag */
         }
 
         /* RCDATA/RAWTEXT */

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<body>
+<p>Test 1: Basic script</p>
+<script>var x = 1;</script>
+
+<p>Test 2: Escaped comment — content preserved, then script closes</p>
+<script><!-- comment --></script>
+
+<p>Test 3: Double escape — inner script/endscript don't close outer</p>
+<script><!-- <script>x</script> --></script>
+
+<p>Test 4: Double escape with real content</p>
+<script>
+<!--
+document.write('<script>alert(1)<\/script>');
+-->
+</script>
+</body>
+</html>
