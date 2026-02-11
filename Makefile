@@ -102,6 +102,9 @@ test-encoding: parse_html
 	@echo "=== Encoding: default UTF-8 ==="
 	./parse_html tests/encoding_default_utf8.html
 
+test-parse-errors: parse_html
+	HTMLPARSER_PARSE_ERRORS=1 ./parse_html tests/tree_parse_errors.html
+
 test-all: test-html test-fragment test-encoding
 
 clean:

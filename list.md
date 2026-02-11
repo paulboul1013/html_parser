@@ -367,8 +367,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 | 類別 | 已報告 | 未報告 | 備註 |
 |------|--------|--------|------|
-| Tokenizer parse errors（~25 種） | ~20 | ~5 | `eof-in-*`, `unexpected-*` 等 |
-| Tree construction parse errors（~55 種） | ~5 | ~50 | 大多直接忽略或隱式容錯 |
+| Tokenizer parse errors（~25 種） | ~20 | ~5 | `eof-in-*`, `unexpected-*` 等；已改為 stderr + env var gate |
+| Tree construction parse errors（~55 種） | ~40 | ~15 | `tree_parse_error()` 系統性報告，`HTMLPARSER_PARSE_ERRORS=1` 啟用 |
 
 ---
 
@@ -425,7 +425,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 ### 剩餘待完成項目
 
-1. **完整 parse error 報告** — 系統性驗證所有 WHATWG 定義的 tree construction parse error
+1. ~~**完整 parse error 報告**~~ ✅ — `tree_parse_error()` 已實作 ~40 種 tree construction parse error
 2. **`<input>` type=hidden 在 table 中的特殊處理** — 不 foster parent，直接插入 table
 3. **Select scope** — 除 `optgroup` / `option` 外所有元素皆為障壁
 4. **`<frameset>` 模式** — 已淘汰，極低優先

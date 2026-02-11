@@ -1,0 +1,57 @@
+<!-- Tree construction parse error test cases -->
+
+<!-- 1. missing-doctype: no DOCTYPE before content -->
+<html><body>
+
+<!-- 2. stray-doctype: DOCTYPE after initial mode -->
+<!DOCTYPE html>
+
+<!-- 3. unexpected-start-tag: <html> in body -->
+<html>
+
+<!-- 4. unexpected-start-tag: <body> in body -->
+<body>
+
+<!-- 5. unexpected-start-tag: heading inside heading -->
+<h1>outer<h2>inner</h2></h1>
+
+<!-- 6. unexpected-start-tag: nested form -->
+<form>
+  <form>nested form ignored</form>
+</form>
+
+<!-- 7. unexpected-end-tag: </p> not in button scope -->
+</p>
+
+<!-- 8. unexpected-end-tag: </li> not in list item scope -->
+</li>
+
+<!-- 9. unexpected-end-tag: </dd> not in scope -->
+</dd>
+
+<!-- 10. unexpected-end-tag: </form> without form -->
+</form>
+
+<!-- 11. end-tag-with-unclosed-elements: </body> with open elements -->
+<div><span>unclosed
+</body>
+
+<!-- 12. foster-parenting: text in table -->
+<table>foster text<tr><td>cell</td></tr></table>
+
+<!-- 13. unexpected-start-tag: nested select -->
+<select>
+  <option>opt1</option>
+  <select>nested select ignored</select>
+</select>
+
+<!-- 14. unexpected-start-tag: duplicate head -->
+<head></head>
+
+<!-- 15. unexpected-end-tag: generic end tag not in scope -->
+</nonexistent>
+
+<!-- 16. foster-parenting: form in table -->
+<table><form><tr><td>cell</td></tr></form></table>
+
+</body></html>

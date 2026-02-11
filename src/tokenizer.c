@@ -109,9 +109,15 @@ static char *sb_to_string(strbuf *sb) {
     return out;
 }
 
+static int tz_errors_enabled = -1;
 static void report_error(const tokenizer *tz, const char *msg) {
     if (!msg) return;
-    printf("[parse error] line=%zu col=%zu: %s\n", tz ? tz->line : 0, tz ? tz->col : 0, msg);
+    if (tz_errors_enabled < 0) {
+        const char *e = getenv("HTMLPARSER_PARSE_ERRORS");
+        tz_errors_enabled = (e && e[0] == '1') ? 1 : 0;
+    }
+    if (tz_errors_enabled)
+        fprintf(stderr, "[parse error] line=%zu col=%zu: %s\n", tz ? tz->line : 0, tz ? tz->col : 0, msg);
 }
 
 static int is_hex_digit(char c) {
@@ -1323,7 +1329,12 @@ char *tokenizer_replace_nulls(const char *raw, size_t raw_len) {
     for (size_t i = 0; i < raw_len; i++) {
         unsigned char c = (unsigned char)raw[i];
         if (c == '\0') {
-            printf("[parse error] line=%zu col=%zu: unexpected null character\n", line, col);
+            if (tz_errors_enabled < 0) {
+                const char *e = getenv("HTMLPARSER_PARSE_ERRORS");
+                tz_errors_enabled = (e && e[0] == '1') ? 1 : 0;
+            }
+            if (tz_errors_enabled)
+                fprintf(stderr, "[parse error] line=%zu col=%zu: unexpected null character\n", line, col);
             out[j++] = (char)0xEF;
             out[j++] = (char)0xBF;
             out[j++] = (char)0xBD;

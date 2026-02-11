@@ -3,8 +3,18 @@
 #include "tokenizer.h"
 #include "foreign.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int tree_errors_enabled = -1;
+static void tree_parse_error(const char *msg) {
+    if (tree_errors_enabled < 0) {
+        const char *e = getenv("HTMLPARSER_PARSE_ERRORS");
+        tree_errors_enabled = (e && e[0] == '1') ? 1 : 0;
+    }
+    if (tree_errors_enabled) fprintf(stderr, "[parse error] %s\n", msg);
+}
 
 static void attach_attrs(node *n, const token_attr *src, size_t count) {
     if (!n || !src || count == 0) return;
@@ -644,6 +654,7 @@ static int adoption_agency(node_stack *st, formatting_list *fl, node *doc,
 
         /* Step 4f: not in scope → parse error, return */
         if (!has_element_in_scope(st, tag_name)) {
+            tree_parse_error("adoption-agency-1.1");
             return 1;
         }
 
@@ -890,9 +901,11 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
                                           node **form_element_pointer) {
     /* Table-related tags are parse errors in IN_BODY; ignore them. */
     if (is_body_ignored_start(name)) {
+        tree_parse_error("unexpected-start-tag");
         return;
     }
     if (is_heading_element(name) && stack_has_open_heading(st)) {
+        tree_parse_error("unexpected-start-tag");
         stack_pop_until_heading(st);
     }
     if (name && (strcmp(name, "applet") == 0 || strcmp(name, "marquee") == 0 || strcmp(name, "object") == 0)) {
@@ -954,7 +967,7 @@ static void handle_in_body_start_fragment(const char *name, int self_closing, no
     }
     if (name && strcmp(name, "form") == 0) {
         if (form_element_pointer && *form_element_pointer && !in_template_context(st)) {
-            /* Parse error: ignore nested form */
+            tree_parse_error("unexpected-start-tag");
             return;
         }
         if (dmode != DOC_QUIRKS && has_element_in_button_scope(st, "p")) {
@@ -1344,14 +1357,17 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         reconstruct_active_formatting(st, fmt, parent);
     }
     if (name && strcmp(name, "html") == 0) {
+        tree_parse_error("unexpected-start-tag");
         return;
     }
     if (name && is_heading_element(name)) {
         if (stack_has_open_heading(st)) {
+            tree_parse_error("unexpected-start-tag");
             stack_pop_until_heading(st);
         }
     }
     if (name && strcmp(name, "body") == 0) {
+        tree_parse_error("unexpected-start-tag");
         if (!in_template) {
             ensure_body(doc, st, html, body);
         }
@@ -1432,7 +1448,7 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     }
     if (name && strcmp(name, "form") == 0) {
         if (form_element_pointer && *form_element_pointer && !in_template) {
-            /* Parse error: ignore nested form */
+            tree_parse_error("unexpected-start-tag");
             return;
         }
         if (has_element_in_button_scope(st, "p")) {
@@ -1515,6 +1531,7 @@ static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
         }
 
         case TOKEN_DOCTYPE:
+            tree_parse_error("stray-doctype");
             return 1; /* ignore */
 
         case TOKEN_END_TAG:
@@ -1840,6 +1857,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                 if (table_text.len > 0) {
                     node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
                     if (table_text_has_non_ws) {
+                        tree_parse_error("foster-parenting");
                         foster_insert(&st, doc, text);
                     } else {
                         node_append_child(current_node(&st, doc), text);
@@ -1854,13 +1872,18 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
 
             switch (t->type) {
                 case TOKEN_DOCTYPE:
+                    if (mode != MODE_INITIAL) {
+                        tree_parse_error("stray-doctype");
+                        break;
+                    }
                     n = node_create(NODE_DOCTYPE, t->name ? t->name : "", NULL);
                     node_append_child(doc, n);
                     dmode = determine_doc_mode(t);
-                    if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
+                    mode = MODE_BEFORE_HTML;
                     break;
                 case TOKEN_START_TAG:
                     if (mode == MODE_INITIAL) {
+                        tree_parse_error("missing-doctype");
                         dmode = DOC_QUIRKS;
                         mode = MODE_BEFORE_HTML;
                     }
@@ -1891,6 +1914,8 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 attach_attrs(head, t->attrs, t->attr_count);
                                 node_append_child(ensure_html(doc, &st, &html), head);
                                 stack_push(&st, head);
+                            } else {
+                                tree_parse_error("unexpected-start-tag");
                             }
                             break;
                         }
@@ -2009,9 +2034,10 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             }
                             if (t->name && strcmp(t->name, "form") == 0) {
                                 if (form_element_pointer && !in_template_context(&st)) {
-                                    /* ignore nested form */
+                                    tree_parse_error("unexpected-start-tag");
                                     break;
                                 }
+                                tree_parse_error("foster-parenting");
                                 node *table = NULL;
                                 node *fp = foster_parent(&st, doc, &table);
                                 n = node_create(NODE_ELEMENT, "form", NULL);
@@ -2236,7 +2262,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         break;
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t->name && strcmp(t->name, "select") == 0) {
-                            /* ignore nested select */
+                            tree_parse_error("unexpected-start-tag");
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -2290,6 +2316,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             form_element_pointer = NULL;
                             int idx;
                             if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                tree_parse_error("unexpected-end-tag");
                                 if (node_ptr == NULL) break;
                                 if (!has_element_in_scope(&st, "form")) break;
                             }
@@ -2299,7 +2326,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                                 stack_remove_at(&st, idx);
                             }
                         } else {
-                             if (has_element_in_scope(&st, "form")) {
+                             if (!has_element_in_scope(&st, "form")) {
+                                 tree_parse_error("unexpected-end-tag");
+                             } else {
                                  generate_implied_end_tags(&st);
                                  stack_pop_until(&st, "form");
                              }
@@ -2308,12 +2337,18 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     }
                     if (t->name && strcmp(t->name, "body") == 0 && mode == MODE_IN_BODY) {
                         generate_implied_end_tags(&st);
+                        {
+                            node *cur = stack_top(&st);
+                            if (!cur || !cur->name || strcmp(cur->name, "body") != 0)
+                                tree_parse_error("end-tag-with-unclosed-elements");
+                        }
                         stack_pop_until(&st, "body");
                         mode = MODE_AFTER_BODY;
                         break;
                     }
                     if (t->name && strcmp(t->name, "p") == 0 && mode == MODE_IN_BODY) {
                         if (!has_element_in_button_scope(&st, "p")) {
+                            tree_parse_error("unexpected-end-tag");
                             node *parent = current_node(&st, doc);
                             node *pn = node_create(NODE_ELEMENT, "p", NULL);
                             node_append_child(parent, pn);
@@ -2324,13 +2359,19 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         break;
                     }
                     if (t->name && strcmp(t->name, "li") == 0 && mode == MODE_IN_BODY) {
-                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        if (!has_element_in_list_item_scope(&st, "li")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, "li");
                         stack_pop_until(&st, "li");
                         break;
                     }
                     if (t->name && (strcmp(t->name, "dd") == 0 || strcmp(t->name, "dt") == 0) && mode == MODE_IN_BODY) {
-                        if (!has_element_in_scope(&st, t->name)) break;
+                        if (!has_element_in_scope(&st, t->name)) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, t->name);
                         stack_pop_until(&st, t->name);
                         break;
@@ -2410,6 +2451,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         }
                     }
                     if (t->name && !has_element_in_scope(&st, t->name)) {
+                        tree_parse_error("unexpected-end-tag");
                         break;
                     }
                     stack_pop_until(&st, t->name);
@@ -2434,6 +2476,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (mode == MODE_AFTER_BODY || mode == MODE_AFTER_AFTER_BODY) {
+                            tree_parse_error("unexpected-token-after-body");
                             mode = MODE_IN_BODY;
                         }
                         if (mode == MODE_IN_HEAD) {
@@ -2466,6 +2509,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (mode == MODE_INITIAL) {
+                            tree_parse_error("missing-doctype");
                             dmode = DOC_QUIRKS;
                             mode = MODE_BEFORE_HTML;
                         }
@@ -2573,6 +2617,7 @@ node *build_tree_from_input(const char *input) {
                 if (table_text.len > 0) {
                     node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
                     if (table_text_has_non_ws) {
+                        tree_parse_error("foster-parenting");
                         foster_insert(&st, doc, text);
                     } else {
                         node_append_child(current_node(&st, doc), text);
@@ -2587,13 +2632,18 @@ node *build_tree_from_input(const char *input) {
 
             switch (t.type) {
                 case TOKEN_DOCTYPE:
+                    if (mode != MODE_INITIAL) {
+                        tree_parse_error("stray-doctype");
+                        break;
+                    }
                     n = node_create(NODE_DOCTYPE, t.name ? t.name : "", NULL);
                     node_append_child(doc, n);
                     dmode = determine_doc_mode(&t);
-                    if (mode == MODE_INITIAL) mode = MODE_BEFORE_HTML;
+                    mode = MODE_BEFORE_HTML;
                     break;
                 case TOKEN_START_TAG:
                     if (mode == MODE_INITIAL) {
+                        tree_parse_error("missing-doctype");
                         dmode = DOC_QUIRKS;
                         mode = MODE_BEFORE_HTML;
                     }
@@ -2624,6 +2674,8 @@ node *build_tree_from_input(const char *input) {
                                 attach_attrs(head, t.attrs, t.attr_count);
                                 node_append_child(ensure_html(doc, &st, &html), head);
                                 stack_push(&st, head);
+                            } else {
+                                tree_parse_error("unexpected-start-tag");
                             }
                             break;
                         }
@@ -2665,8 +2717,10 @@ node *build_tree_from_input(const char *input) {
                     if (mode == MODE_IN_TABLE) {
                         if (t.name && strcmp(t.name, "form") == 0) {
                             if (form_element_pointer && !in_template_context(&st)) {
+                                tree_parse_error("unexpected-start-tag");
                                 break;
                             }
+                            tree_parse_error("foster-parenting");
                             node *table = NULL;
                             node *fp = foster_parent(&st, doc, &table);
                             n = node_create(NODE_ELEMENT, "form", NULL);
@@ -2966,6 +3020,7 @@ node *build_tree_from_input(const char *input) {
                         break;
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t.name && strcmp(t.name, "select") == 0) {
+                            tree_parse_error("unexpected-start-tag");
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -3015,6 +3070,11 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && strcmp(t.name, "body") == 0 && mode == MODE_IN_BODY) {
                         generate_implied_end_tags(&st);
+                        {
+                            node *cur = stack_top(&st);
+                            if (!cur || !cur->name || strcmp(cur->name, "body") != 0)
+                                tree_parse_error("end-tag-with-unclosed-elements");
+                        }
                         stack_pop_until(&st, "body");
                         mode = MODE_AFTER_BODY;
                         break;
@@ -3025,6 +3085,7 @@ node *build_tree_from_input(const char *input) {
                             form_element_pointer = NULL;
                             int idx;
                             if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                tree_parse_error("unexpected-end-tag");
                                 if (node_ptr == NULL) break;
                                 if (!has_element_in_scope(&st, "form")) break;
                             }
@@ -3034,7 +3095,9 @@ node *build_tree_from_input(const char *input) {
                                 stack_remove_at(&st, idx);
                             }
                         } else {
-                             if (has_element_in_scope(&st, "form")) {
+                             if (!has_element_in_scope(&st, "form")) {
+                                 tree_parse_error("unexpected-end-tag");
+                             } else {
                                  generate_implied_end_tags(&st);
                                  stack_pop_until(&st, "form");
                              }
@@ -3043,6 +3106,7 @@ node *build_tree_from_input(const char *input) {
                     }
                     if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
                         if (!has_element_in_button_scope(&st, "p")) {
+                            tree_parse_error("unexpected-end-tag");
                             node *parent = current_node(&st, doc);
                             node *pn = node_create(NODE_ELEMENT, "p", NULL);
                             node_append_child(parent, pn);
@@ -3053,13 +3117,19 @@ node *build_tree_from_input(const char *input) {
                         break;
                     }
                     if (t.name && strcmp(t.name, "li") == 0 && mode == MODE_IN_BODY) {
-                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        if (!has_element_in_list_item_scope(&st, "li")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, "li");
                         stack_pop_until(&st, "li");
                         break;
                     }
                     if (t.name && (strcmp(t.name, "dd") == 0 || strcmp(t.name, "dt") == 0) && mode == MODE_IN_BODY) {
-                        if (!has_element_in_scope(&st, t.name)) break;
+                        if (!has_element_in_scope(&st, t.name)) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, t.name);
                         stack_pop_until(&st, t.name);
                         break;
@@ -3139,6 +3209,7 @@ node *build_tree_from_input(const char *input) {
                         }
                     }
                     if (t.name && !has_element_in_scope(&st, t.name)) {
+                        tree_parse_error("unexpected-end-tag");
                         break;
                     }
                     stack_pop_until(&st, t.name);
@@ -3163,6 +3234,7 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (mode == MODE_AFTER_BODY || mode == MODE_AFTER_AFTER_BODY) {
+                            tree_parse_error("unexpected-token-after-body");
                             mode = MODE_IN_BODY;
                         }
                         if (mode == MODE_IN_HEAD) {
@@ -3195,6 +3267,7 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (mode == MODE_INITIAL) {
+                            tree_parse_error("missing-doctype");
                             dmode = DOC_QUIRKS;
                             mode = MODE_BEFORE_HTML;
                         }
@@ -3323,6 +3396,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                 if (table_text.len > 0) {
                     node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
                     if (table_text_has_non_ws) {
+                        tree_parse_error("foster-parenting");
                         foster_insert(&st, doc, text);
                     } else {
                         node_append_child(current_node(&st, doc), text);
@@ -3579,6 +3653,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         break;
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t.name && strcmp(t.name, "select") == 0) {
+                            tree_parse_error("unexpected-start-tag");
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -3624,6 +3699,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             form_element_pointer = NULL;
                             int idx;
                             if (node_ptr == NULL || !has_element_in_scope(&st, "form")) {
+                                tree_parse_error("unexpected-end-tag");
                                 if (node_ptr == NULL) break;
                                 if (!has_element_in_scope(&st, "form")) break;
                             }
@@ -3633,7 +3709,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                                 stack_remove_at(&st, idx);
                             }
                         } else {
-                             if (has_element_in_scope(&st, "form")) {
+                             if (!has_element_in_scope(&st, "form")) {
+                                 tree_parse_error("unexpected-end-tag");
+                             } else {
                                  generate_implied_end_tags(&st);
                                  stack_pop_until(&st, "form");
                              }
@@ -3642,6 +3720,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     }
                     if (t.name && strcmp(t.name, "p") == 0 && mode == MODE_IN_BODY) {
                         if (!has_element_in_button_scope(&st, "p")) {
+                            tree_parse_error("unexpected-end-tag");
                             node *parent = current_node(&st, doc);
                             node *pn = node_create(NODE_ELEMENT, "p", NULL);
                             node_append_child(parent, pn);
@@ -3652,13 +3731,19 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         break;
                     }
                     if (t.name && strcmp(t.name, "li") == 0 && mode == MODE_IN_BODY) {
-                        if (!has_element_in_list_item_scope(&st, "li")) break;
+                        if (!has_element_in_list_item_scope(&st, "li")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, "li");
                         stack_pop_until(&st, "li");
                         break;
                     }
                     if (t.name && (strcmp(t.name, "dd") == 0 || strcmp(t.name, "dt") == 0) && mode == MODE_IN_BODY) {
-                        if (!has_element_in_scope(&st, t.name)) break;
+                        if (!has_element_in_scope(&st, t.name)) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         generate_implied_end_tags_except(&st, t.name);
                         stack_pop_until(&st, t.name);
                         break;
@@ -3711,6 +3796,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         }
                     }
                     if (t.name && !has_element_in_scope(&st, t.name)) {
+                        tree_parse_error("unexpected-end-tag");
                         break;
                     }
                     stack_pop_until(&st, t.name);
