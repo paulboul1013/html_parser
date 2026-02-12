@@ -88,14 +88,14 @@
 | Script data double escaped dash dash state | ✅ | |
 | Script data double escaped less-than sign state | ✅ | |
 | Script data double escape end state | ✅ | |
-| RCDATA less-than sign state | 🔧 | 用 `find_end_tag()` 替代狀態機 |
-| RCDATA end tag open state | 🔧 | |
-| RCDATA end tag name state | 🔧 | |
-| RAWTEXT less-than sign state | 🔧 | 用 `find_end_tag()` 替代狀態機 |
-| RAWTEXT end tag open state | 🔧 | |
-| RAWTEXT end tag name state | 🔧 | |
+| RCDATA less-than sign state | ✅ | `process_rcdata_rawtext()` 逐字元狀態機 |
+| RCDATA end tag open state | ✅ | |
+| RCDATA end tag name state | ✅ | |
+| RAWTEXT less-than sign state | ✅ | `process_rcdata_rawtext()` 逐字元狀態機 |
+| RAWTEXT end tag open state | ✅ | |
+| RAWTEXT end tag name state | ✅ | |
 
-**小結**：80 個狀態中 ~64 個完整實作，~6 個用替代方式實作（功能等效），0 個未實作。Script data 的 18 個子狀態已透過 `process_script_data()` 逐字元狀態機完整實作。CDATA 已透過 `allow_cdata` flag 實作。PLAINTEXT 已實作（進入後永不離開）。RCDATA/RAWTEXT 的 end tag 偵測以 `find_end_tag()` 實作而非逐字元狀態機，產出結果等效。
+**小結**：80 個狀態全部完整實作。Script data 的 18 個子狀態透過 `process_script_data()` 逐字元狀態機完整實作。RCDATA/RAWTEXT 的 6 個子狀態透過 `process_rcdata_rawtext()` 逐字元狀態機完整實作（含 `</tag/>` self-closing end tag 支援）。CDATA 已透過 `allow_cdata` flag 實作。PLAINTEXT 已實作（進入後永不離開）。
 
 ### 1.2 Character References
 
@@ -205,7 +205,7 @@
 | List item scope（+`ol`, `ul`） | ✅ | |
 | Button scope（+`button`） | ✅ | |
 | Table scope（`html`, `table`, `template`） | ✅ | |
-| Select scope | ⬜ | 除 `optgroup` / `option` 外所有元素皆為障壁 |
+| Select scope | ✅ | 除 `optgroup` / `option` 外所有元素皆為障壁；`has_element_in_select_scope()` |
 | SVG/MathML scope 元素 | ✅ | `is_scoping_element_ns()` 命名空間感知 |
 
 ### 2.5 Auto-close 邏輯
@@ -325,7 +325,7 @@
 |------|------|------|
 | `<form>` element pointer | ✅ | WHATWG 維護的 "form element pointer"；form-associated 元素自動關聯 |
 | `<input>` / `<button>` / `<select>` / `<textarea>` 基本解析 | ✅ | |
-| `<input>` type=hidden 在 table 中的特殊處理 | ⬜ | |
+| `<input>` type=hidden 在 table 中的特殊處理 | ✅ | 直接插入 table，不 foster parent |
 
 ### 6.5 Scripting 相關
 
@@ -390,24 +390,24 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 | 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
 |------|--------|---------|--------|--------|
-| Tokenizer 狀態（80） | ~64 | ~6 | 0 | ~98% |
+| Tokenizer 狀態（80） | 80 | 0 | 0 | 100% |
 | Character References | 6/7 | 0 | 1 | 86% |
 | Insertion Modes（23） | 15 | 4 | 4 | ~83% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
 | Formatting / AFE | 10/10 | 0 | 0 | 100% |
-| Scope | 5/6 | 0 | 1 | 83% |
+| Scope | 6/6 | 0 | 0 | 100% |
 | Auto-close | 11/11 | 0 | 0 | 100% |
 | Fragment Parsing | 6/7 | 0 | 1 | 86% |
 | Encoding Sniffing | 12/14 | 0 | 2 | 86% |
 | Serialization | 10/11 | 0 | 1 | 91% |
 | Foreign Content | 9/9 | 0 | 0 | 100% |
-| Form | 2/3 | 0 | 1 | 67% |
+| Form | 3/3 | 0 | 0 | 100% |
 | Template | 3/4 | 1 | 0 | ~90% |
 
 ### 整體評估
 
-- **核心 HTML 解析（含 SVG/MathML）**：~92% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。
-- **完全符合 WHATWG 規範（含所有邊緣情況）**：~80% 完成。
+- **核心 HTML 解析（含 SVG/MathML）**：~95% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。Tokenizer 狀態機 100% 完成，Scope 100% 完成，Formatting 100% 完成。
+- **完全符合 WHATWG 規範（含所有邊緣情況）**：~85% 完成。
 
 ### 已完成里程碑
 
@@ -422,10 +422,16 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 9. ✅ **Foreign Content（SVG/MathML）** — 命名空間、Integration Points、CDATA、大小寫修正
 10. ✅ **PLAINTEXT state** — 進入後永不離開，所有後續輸入為文字
 11. ✅ **Script data 完整狀態機** — `process_script_data()` 逐字元實作 18 個子狀態（WHATWG §13.2.5.4–§13.2.5.20）
+12. ✅ **RCDATA/RAWTEXT 完整狀態機** — `process_rcdata_rawtext()` 逐字元實作 6 個子狀態，取代 `find_end_tag()` 捷徑，修復 `</tag/>` self-closing end tag
+13. ✅ **`<input>` type=hidden 在 table 中的特殊處理** — 檢查 `type` 屬性（大小寫不敏感），直接插入 table 而不 foster parent
+14. ✅ **Select scope** — `has_element_in_select_scope()`，除 `optgroup`/`option` 外所有元素皆為障壁；`<select>` start/end tag 及 table element 在 select 模式中均使用
 
 ### 剩餘待完成項目
 
 1. ~~**完整 parse error 報告**~~ ✅ — `tree_parse_error()` 已實作 ~40 種 tree construction parse error
-2. **`<input>` type=hidden 在 table 中的特殊處理** — 不 foster parent，直接插入 table
-3. **Select scope** — 除 `optgroup` / `option` 外所有元素皆為障壁
-4. **`<frameset>` 模式** — 已淘汰，不實作   
+2. ~~**`<input>` type=hidden 在 table 中的特殊處理**~~ ✅
+3. ~~**Select scope**~~ ✅
+4. **`<frameset>` 模式** — 已淘汰，低優先
+5. **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody` 等
+6. **Stop parsing (§13.2.6.5)** — EOF 時的完整清理步驟
+7. **Noncharacter / surrogate 偵測** — 數字參考解碼後的範圍檢查
