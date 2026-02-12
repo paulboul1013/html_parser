@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+
+  <!-- Test 1: basic </select> closes select and resets mode -->
+  <select>
+    <option>A</option>
+    <optgroup label="g1">
+      <option>B</option>
+    </optgroup>
+  </select>
+
+  <!-- Test 2: <select> start tag inside select — closes existing, reopens -->
+  <select id="outer">
+    <option>first</option>
+    <select id="inner">
+      <option>second</option>
+    </select>
+  </select>
+
+  <!-- Test 3: select in table — mode resets to in-table after </select> -->
+  <table>
+    <tr>
+      <td>
+        <select>
+          <option>in cell</option>
+        </select>
+      </td>
+    </tr>
+  </table>
+
+</body>
+
+</html>

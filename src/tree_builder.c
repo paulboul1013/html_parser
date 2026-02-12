@@ -375,6 +375,19 @@ static int has_element_in_table_scope(node_stack *st, const char *name) {
     return 0;
 }
 
+/* Select scope — everything except optgroup/option is a barrier */
+static int has_element_in_select_scope(node_stack *st, const char *name) {
+    if (!name) return 0;
+    for (size_t i = st->size; i > 0; --i) {
+        node *n = st->items[i - 1];
+        if (!n || !n->name) continue;
+        if (strcmp(n->name, name) == 0) return 1;
+        if (strcmp(n->name, "optgroup") != 0 && strcmp(n->name, "option") != 0)
+            return 0;
+    }
+    return 0;
+}
+
 /* WHATWG §13.2.6.3 — implied end tag elements */
 static int is_implied_end_tag_element(const char *name) {
     if (!name) return 0;
@@ -2289,6 +2302,9 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t->name && strcmp(t->name, "select") == 0) {
                             tree_parse_error("unexpected-start-tag");
+                            if (!has_element_in_select_scope(&st, "select")) break;
+                            stack_pop_until(&st, "select");
+                            mode = reset_insertion_mode_from_stack(&st);
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -2313,8 +2329,10 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             break;
                         }
                         if (mode == MODE_IN_SELECT_IN_TABLE && t->name && is_table_element(t->name)) {
+                            tree_parse_error("unexpected-start-tag-in-select");
+                            if (!has_element_in_select_scope(&st, "select")) break;
                             stack_pop_until(&st, "select");
-                            mode = MODE_IN_TABLE;
+                            mode = reset_insertion_mode_from_stack(&st);
                             reprocess = 1;
                             break;
                         }
@@ -2442,14 +2460,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t->name && strcmp(t->name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) &&
-                        stack_has_open_named(&st, "select")) {
-                        stack_pop_until(&st, "select");
-                        if (mode == MODE_IN_SELECT_IN_TABLE) {
-                            mode = (stack_has_open_named(&st, "td") || stack_has_open_named(&st, "th")) ? MODE_IN_CELL : MODE_IN_TABLE;
-                        } else {
-                            mode = MODE_IN_BODY;
+                    if (t->name && strcmp(t->name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE)) {
+                        if (!has_element_in_select_scope(&st, "select")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
                         }
+                        stack_pop_until(&st, "select");
+                        mode = reset_insertion_mode_from_stack(&st);
                         break;
                     }
                     if (t->name && (strcmp(t->name, "applet") == 0 || strcmp(t->name, "marquee") == 0 || strcmp(t->name, "object") == 0)) {
@@ -3062,6 +3079,9 @@ node *build_tree_from_input(const char *input) {
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             tree_parse_error("unexpected-start-tag");
+                            if (!has_element_in_select_scope(&st, "select")) break;
+                            stack_pop_until(&st, "select");
+                            mode = reset_insertion_mode_from_stack(&st);
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -3086,8 +3106,10 @@ node *build_tree_from_input(const char *input) {
                             break;
                         }
                         if (mode == MODE_IN_SELECT_IN_TABLE && t.name && is_table_element(t.name)) {
+                            tree_parse_error("unexpected-start-tag-in-select");
+                            if (!has_element_in_select_scope(&st, "select")) break;
                             stack_pop_until(&st, "select");
-                            mode = MODE_IN_TABLE;
+                            mode = reset_insertion_mode_from_stack(&st);
                             reprocess = 1;
                             break;
                         }
@@ -3215,14 +3237,13 @@ node *build_tree_from_input(const char *input) {
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) &&
-                        stack_has_open_named(&st, "select")) {
-                        stack_pop_until(&st, "select");
-                        if (mode == MODE_IN_SELECT_IN_TABLE) {
-                            mode = (stack_has_open_named(&st, "td") || stack_has_open_named(&st, "th")) ? MODE_IN_CELL : MODE_IN_TABLE;
-                        } else {
-                            mode = MODE_IN_BODY;
+                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE)) {
+                        if (!has_element_in_select_scope(&st, "select")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
                         }
+                        stack_pop_until(&st, "select");
+                        mode = reset_insertion_mode_from_stack(&st);
                         break;
                     }
                     if (t.name && (strcmp(t.name, "applet") == 0 || strcmp(t.name, "marquee") == 0 || strcmp(t.name, "object") == 0)) {
@@ -3710,6 +3731,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     } else if (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) {
                         if (t.name && strcmp(t.name, "select") == 0) {
                             tree_parse_error("unexpected-start-tag");
+                            if (!has_element_in_select_scope(&st, "select")) break;
+                            stack_pop_until(&st, "select");
+                            mode = reset_insertion_mode_from_stack(&st);
                             break;
                         }
                         /* Auto-close an open <option> before a new <option> or <optgroup> */
@@ -3836,9 +3860,13 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                         mode = MODE_IN_TABLE;
                         break;
                     }
-                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE) && stack_has_open_named(&st, "select")) {
+                    if (t.name && strcmp(t.name, "select") == 0 && (mode == MODE_IN_SELECT || mode == MODE_IN_SELECT_IN_TABLE)) {
+                        if (!has_element_in_select_scope(&st, "select")) {
+                            tree_parse_error("unexpected-end-tag");
+                            break;
+                        }
                         stack_pop_until(&st, "select");
-                        mode = mode == MODE_IN_SELECT_IN_TABLE ? MODE_IN_TABLE : MODE_IN_BODY;
+                        mode = reset_insertion_mode_from_stack(&st);
                         break;
                     }
                     if (mode == MODE_IN_BODY ||
