@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 static int tree_errors_enabled = -1;
 static void tree_parse_error(const char *msg) {
@@ -73,6 +74,15 @@ static int is_table_mode(insertion_mode mode) {
            mode == MODE_IN_TABLE_BODY ||
            mode == MODE_IN_ROW ||
            mode == MODE_IN_CELL;
+}
+
+/* Return the value of the attribute with the given name, or NULL if not found. */
+static const char *find_attr(const token_attr *attrs, size_t count, const char *name) {
+    for (size_t i = 0; i < count; i++) {
+        if (attrs[i].name && strcmp(attrs[i].name, name) == 0)
+            return attrs[i].value;
+    }
+    return NULL;
 }
 
 typedef enum {
@@ -2017,6 +2027,22 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             mode = MODE_IN_CELL;
                             break;
                         }
+                        /* <input type=hidden>: insert directly, do NOT foster parent */
+                        if (t->name && strcmp(t->name, "input") == 0) {
+                            const char *tv = find_attr(t->attrs, t->attr_count, "type");
+                            if (tv && strcasecmp(tv, "hidden") == 0) {
+                                tree_parse_error("unexpected-start-tag-in-table");
+                                parent = current_node(&st, doc);
+                                n = node_create(NODE_ELEMENT, "input", NULL);
+                                attach_attrs(n, t->attrs, t->attr_count);
+                                node_append_child(parent, n);
+                                /* void element — don't push to stack */
+                                if (!in_template_context(&st) && form_element_pointer) {
+                                    n->form_owner = form_element_pointer;
+                                }
+                                break;
+                            }
+                        }
                         if (!is_table_element(t->name)) {
                             if (t->name && strcmp(t->name, "template") == 0) {
                                 node *table = NULL;
@@ -2798,6 +2824,21 @@ node *build_tree_from_input(const char *input) {
                             mode = MODE_IN_CELL;
                             break;
                         }
+                        /* <input type=hidden>: insert directly, do NOT foster parent */
+                        if (t.name && strcmp(t.name, "input") == 0) {
+                            const char *tv = find_attr(t.attrs, t.attr_count, "type");
+                            if (tv && strcasecmp(tv, "hidden") == 0) {
+                                tree_parse_error("unexpected-start-tag-in-table");
+                                parent = current_node(&st, doc);
+                                n = node_create(NODE_ELEMENT, "input", NULL);
+                                attach_attrs(n, t.attrs, t.attr_count);
+                                node_append_child(parent, n);
+                                if (!in_template_context(&st) && form_element_pointer) {
+                                    n->form_owner = form_element_pointer;
+                                }
+                                break;
+                            }
+                        }
                         if (!is_table_element(t.name)) {
                             if (t.name && strcmp(t.name, "template") == 0) {
                                 node *table = NULL;
@@ -3495,6 +3536,21 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             mode = MODE_IN_TABLE_BODY;
                             reprocess = 1;
                             break;
+                        }
+                        /* <input type=hidden>: insert directly, do NOT foster parent */
+                        if (t.name && strcmp(t.name, "input") == 0) {
+                            const char *tv = find_attr(t.attrs, t.attr_count, "type");
+                            if (tv && strcasecmp(tv, "hidden") == 0) {
+                                tree_parse_error("unexpected-start-tag-in-table");
+                                parent = current_node(&st, doc);
+                                n = node_create(NODE_ELEMENT, "input", NULL);
+                                attach_attrs(n, t.attrs, t.attr_count);
+                                node_append_child(parent, n);
+                                if (!in_template_context(&st) && form_element_pointer) {
+                                    n->form_owner = form_element_pointer;
+                                }
+                                break;
+                            }
                         }
                         if (!is_table_element(t.name)) {
                             if (t.name && strcmp(t.name, "template") == 0) {
