@@ -72,6 +72,7 @@ test-html: parse_html
 	./parse_html tests/script_states.html
 	./parse_html tests/input_hidden_in_table.html
 	./parse_html tests/select_scope.html
+	./parse_html tests/rcdata_states.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

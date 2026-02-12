@@ -428,4 +428,4 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 1. ~~**完整 parse error 報告**~~ ✅ — `tree_parse_error()` 已實作 ~40 種 tree construction parse error
 2. **`<input>` type=hidden 在 table 中的特殊處理** — 不 foster parent，直接插入 table
 3. **Select scope** — 除 `optgroup` / `option` 外所有元素皆為障壁
-4. **`<frameset>` 模式** — 已淘汰，極低優先
+4. **`<frameset>` 模式** — 已淘汰，不實作   

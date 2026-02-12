@@ -461,33 +461,92 @@ static int starts_with_ci(const tokenizer *tz, const char *s) {
     return 1;
 }
 
-static int starts_with_ci_at(const char *input, size_t pos, size_t len, const char *s) {
-    size_t i = 0;
-    while (s[i] != '\0') {
-        if (pos + i >= len) return 0;
-        char c = input[pos + i];
-        if (to_lower_ascii(c) != to_lower_ascii(s[i])) return 0;
-        i++;
-    }
-    return 1;
-}
+/* ── RCDATA / RAWTEXT state machine (WHATWG §13.2.5.2–§13.2.5.8) ────────────
+ *
+ * Handles:
+ *   RCDATA state / RAWTEXT state            (accumulate text, watch for '<')
+ *   RCDATA/RAWTEXT less-than sign state     ('<' seen, check for '/')
+ *   RCDATA/RAWTEXT end tag open state       ('</' seen, check for alpha)
+ *   RCDATA/RAWTEXT end tag name state       (accumulate name, match raw_tag)
+ *
+ * RCDATA additionally decodes character references in the emitted text.
+ *
+ * Returns 1 if a CHARACTER token was emitted (caller should return).
+ * Returns 0 if state was set to TOKENIZE_DATA with no emission (caller
+ *            should continue the loop so DATA state parses the end tag).
+ */
+static int process_rcdata_rawtext(tokenizer *tz, token *out) {
+    enum { RR_DATA, RR_LT, RR_END_OPEN, RR_END_NAME };
 
-static size_t find_end_tag(const tokenizer *tz, const char *tag) {
-    size_t i = tz->pos;
-    size_t tag_len = strlen(tag);
-    if (tag_len == 0) return tz->len;
-    while (i + 2 + tag_len <= tz->len) {
-        if (tz->input[i] == '<' && tz->input[i + 1] == '/') {
-            if (starts_with_ci_at(tz->input, i + 2, tz->len, tag)) {
-                size_t end = i + 2 + tag_len;
-                if (end < tz->len && (is_ascii_whitespace(tz->input[end]) || tz->input[end] == '>')) {
-                    return i;
+    int is_rcdata = (tz->state == TOKENIZE_RCDATA);
+    size_t start  = tz->pos;
+    size_t lt_pos = 0;
+    char   tmp[16];
+    int    tmp_len = 0;
+    int    ss = RR_DATA;
+
+    while (tz->pos < tz->len) {
+        char c = tz->input[tz->pos];
+
+        switch (ss) {
+
+        case RR_DATA:
+            if (c == '<') { lt_pos = tz->pos; ss = RR_LT; }
+            tz->pos++;
+            break;
+
+        case RR_LT:
+            if (c == '/') { tmp_len = 0; ss = RR_END_OPEN; tz->pos++; }
+            else { ss = RR_DATA; /* reconsume */ }
+            break;
+
+        case RR_END_OPEN:
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                ss = RR_END_NAME; tmp_len = 0; /* reconsume */
+            } else { ss = RR_DATA; /* reconsume */ }
+            break;
+
+        case RR_END_NAME:
+            if (is_ascii_whitespace(c) || c == '/' || c == '>') {
+                tmp[tmp_len] = '\0';
+                if (tmp_len > 0 && strcasecmp(tmp, tz->raw_tag) == 0) {
+                    /* Appropriate end tag → rewind to '<', let DATA parse it */
+                    tz->pos = lt_pos;
+                    tz->state = TOKENIZE_DATA;
+                    if (tz->pos > start) {
+                        out->type = TOKEN_CHARACTER;
+                        out->data = substr_dup(tz->input, start, tz->pos);
+                        if (is_rcdata && out->data) {
+                            char *decoded = decode_character_references(out->data, 0);
+                            if (decoded) { free(out->data); out->data = decoded; }
+                        }
+                        return 1;
+                    }
+                    return 0;
                 }
-            }
+                ss = RR_DATA; /* not the right tag — reconsume */
+            } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                if (tmp_len < 15) tmp[tmp_len++] = to_lower_ascii(c);
+                else { ss = RR_DATA; break; }
+                tz->pos++;
+            } else { ss = RR_DATA; /* reconsume */ }
+            break;
         }
-        i++;
     }
-    return tz->len;
+
+    /* EOF reached while in RCDATA/RAWTEXT — emit remaining text */
+    if (tz->pos > start) {
+        out->type = TOKEN_CHARACTER;
+        out->data = substr_dup(tz->input, start, tz->pos);
+        if (is_rcdata && out->data) {
+            char *decoded = decode_character_references(out->data, 0);
+            if (decoded) { free(out->data); out->data = decoded; }
+        }
+        tz->state = TOKENIZE_DATA;
+        return 1;
+    }
+    tz->state = TOKENIZE_DATA;
+    return 0;
 }
 
 /* ── Script data state machine (WHATWG §13.2.5.4–§13.2.5.20) ────────────────
@@ -1031,7 +1090,7 @@ static void parse_end_tag(tokenizer *tz, token *out) {
     size_t name_end;
     advance(tz, 2); /* "</" */
     name_start = tz->pos;
-    while (tz->pos < tz->len && !is_ascii_whitespace(peek(tz, 0)) && peek(tz, 0) != '>') {
+    while (tz->pos < tz->len && !is_ascii_whitespace(peek(tz, 0)) && peek(tz, 0) != '>' && peek(tz, 0) != '/') {
         advance(tz, 1);
     }
     name_end = tz->pos;
@@ -1428,27 +1487,9 @@ void tokenizer_next(tokenizer *tz, token *out) {
             continue; /* state is now DATA; loop exits, DATA parsing handles end tag */
         }
 
-        /* RCDATA/RAWTEXT */
-        size_t end = find_end_tag(tz, tz->raw_tag);
-        out->type = TOKEN_CHARACTER;
-        out->data = substr_dup(tz->input, tz->pos, end);
-        if (out->data && tz->state == TOKENIZE_RCDATA) {
-            char *decoded = decode_character_references(out->data, 0);
-            if (decoded) {
-                free(out->data);
-                out->data = decoded;
-            }
-        }
-        if (end < tz->len) {
-            advance(tz, end - tz->pos);
-        } else {
-            advance(tz, tz->len - tz->pos);
-            tz->state = TOKENIZE_DATA;
-        }
-        if (end < tz->len) {
-            tz->state = TOKENIZE_DATA;
-        }
-        return;
+        /* RCDATA/RAWTEXT — proper state machine */
+        if (process_rcdata_rawtext(tz, out)) return;
+        continue; /* state is now DATA; loop exits, DATA parsing handles end tag */
     }
 
     c = peek(tz, 0);

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head>
+
+<!-- Test 1: basic RCDATA with character references -->
+<title>Hello &amp; World</title>
+
+<!-- Test 2: self-closing end tag </title/> (previously broken) -->
+<title>Self-close test</title/>
+
+<!-- Test 3: non-matching partial end tags stay as text -->
+<title>Has </div> and </titl inside</title>
+
+<!-- Test 4: case-insensitive end tag -->
+<title>Case test</TITLE>
+
+<!-- Test 5: end tag with extra whitespace / attributes (ignored) -->
+<title>Spaced</title  >
+
+<!-- Test 6: RCDATA textarea with &amp; -->
+</head><body>
+<textarea>text &amp; more</textarea>
+
+<!-- Test 7: </title not followed by valid terminator stays as text -->
+<title>Has </titlefoo> inside</title>
+
+</body></html>
