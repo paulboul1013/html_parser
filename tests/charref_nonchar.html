@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html><body>
+
+<!-- Test 1: Noncharacters — parse error, keep character -->
+<p>&#xFDD0; &#xFDEF; &#xFFFE; &#xFFFF; &#x1FFFE; &#x10FFFF;</p>
+
+<!-- Test 2: Surrogates — parse error, replace with U+FFFD -->
+<p>&#xD800; &#xDBFF; &#xDC00; &#xDFFF;</p>
+
+<!-- Test 3: Out of range — parse error, replace with U+FFFD -->
+<p>&#x110000; &#xFFFFFF;</p>
+
+<!-- Test 4: NULL — parse error, replace with U+FFFD -->
+<p>&#x0;</p>
+
+<!-- Test 5: Control characters — parse error, keep character (NOT U+FFFD) -->
+<p>&#x1;&#x8;&#xB;&#xD;&#x7F;&#x81;&#x8D;&#x8F;&#x90;</p>
+
+<!-- Test 6: ASCII whitespace controls — NO parse error -->
+<p>[&#x9;][&#xA;][&#xC;]</p>
+
+<!-- Test 7: Windows-1252 mapped — adjusted (also control-character-reference) -->
+<p>&#x80;&#x93;&#x9F;</p>
+
+</body></html>

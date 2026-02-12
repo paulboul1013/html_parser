@@ -160,11 +160,51 @@ static size_t encode_utf8(unsigned int codepoint, char *out) {
     return 1;
 }
 
-/* WHATWG numeric character reference replacement table (Windows-1252 control area) */
-static unsigned int numeric_ref_adjust(unsigned int cp) {
-    if (cp == 0x00) return 0xFFFD;
-    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0xFFFD;
+/* Parse error reporter for character reference context (no tokenizer pointer) */
+static void charref_error(const char *msg) {
+    if (tz_errors_enabled < 0) {
+        const char *e = getenv("HTMLPARSER_PARSE_ERRORS");
+        tz_errors_enabled = (e && e[0] == '1') ? 1 : 0;
+    }
+    if (tz_errors_enabled)
+        fprintf(stderr, "[parse error] %s\n", msg);
+}
 
+/* WHATWG §13.2.5.80 — Numeric character reference end state */
+static unsigned int numeric_ref_adjust(unsigned int cp) {
+    /* 1. NULL → U+FFFD */
+    if (cp == 0x00) {
+        charref_error("null-character-reference");
+        return 0xFFFD;
+    }
+    /* 2. Out of Unicode range → U+FFFD */
+    if (cp > 0x10FFFF) {
+        charref_error("character-reference-outside-unicode-range");
+        return 0xFFFD;
+    }
+    /* 3. Surrogate → U+FFFD */
+    if (cp >= 0xD800 && cp <= 0xDFFF) {
+        charref_error("surrogate-character-reference");
+        return 0xFFFD;
+    }
+
+    /* 4. Noncharacter — parse error, keep character as-is */
+    if ((cp >= 0xFDD0 && cp <= 0xFDEF) || ((cp & 0xFFFE) == 0xFFFE)) {
+        charref_error("noncharacter-character-reference");
+        return cp;
+    }
+
+    /* 5. Control character (0x0D, or C0/C1 control not ASCII whitespace) — parse error, keep.
+     *    Then check Windows-1252 table for mapping. */
+    if (cp == 0x0D ||
+        (cp >= 0x01 && cp <= 0x08) ||
+        cp == 0x0B ||
+        (cp >= 0x0E && cp <= 0x1F) ||
+        (cp >= 0x7F && cp <= 0x9F)) {
+        charref_error("control-character-reference");
+    }
+
+    /* 6. Windows-1252 mapping table (0x80–0x9F control area) */
     switch (cp) {
         case 0x80: return 0x20AC;
         case 0x82: return 0x201A;
@@ -194,12 +234,6 @@ static unsigned int numeric_ref_adjust(unsigned int cp) {
         case 0x9E: return 0x017E;
         case 0x9F: return 0x0178;
         default: break;
-    }
-
-    if ((cp >= 0x01 && cp <= 0x08) ||
-        (cp >= 0x0E && cp <= 0x1F) ||
-        (cp >= 0x7F && cp <= 0x9F)) {
-        return 0xFFFD;
     }
 
     return cp;

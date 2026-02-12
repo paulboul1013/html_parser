@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head>
+
+<!-- Test 1: basic RAWTEXT — no character reference decoding -->
+<style>body { content: "&amp;"; }</style>
+
+<!-- Test 2: self-closing end tag </style/> -->
+<style>.a { color: red }</style/>
+
+<!-- Test 3: non-matching partial end tags stay as text -->
+<style>.b { /* </div> </styl </stylesheet> */ }</style>
+
+<!-- Test 4: case-insensitive end tag -->
+<style>.c { font: bold }</STYLE>
+
+<!-- Test 5: end tag with extra whitespace -->
+<style>.d { margin: 0 }</style  >
+
+<!-- Test 6: < not followed by / stays as text -->
+<style>.e { content: "<b>not a tag</b>" }</style>
+
+<!-- Test 7: </style not followed by valid terminator stays as text -->
+<style>.f { /* </stylefoo> */ }</style>
+
+</head><body>
+<p>done</p>
+</body></html>

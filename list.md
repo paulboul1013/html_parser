@@ -107,7 +107,7 @@
 | 無分號容錯（legacy entities） | ✅ | |
 | Attribute context 中的差異處理（`=` / alnum 後不解碼） | ✅ | |
 | Numeric reference 範圍修正（§13.2.5.5 table） | ✅ | Windows-1252 控制區對應、控制碼/無效碼點 → U+FFFD |
-| Noncharacter / surrogate 偵測 | ⬜ | 數字解碼後未檢查 noncharacter 範圍 |
+| Noncharacter / surrogate 偵測 | ✅ | surrogate → U+FFFD；noncharacter → parse error + 保留；control → parse error + 保留/映射 |
 
 ### 1.3 Token 類型
 
@@ -391,7 +391,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 | 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
 |------|--------|---------|--------|--------|
 | Tokenizer 狀態（80） | 80 | 0 | 0 | 100% |
-| Character References | 6/7 | 0 | 1 | 86% |
+| Character References | 7/7 | 0 | 0 | 100% |
 | Insertion Modes（23） | 15 | 4 | 4 | ~83% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
 | Formatting / AFE | 10/10 | 0 | 0 | 100% |
@@ -425,13 +425,14 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 12. ✅ **RCDATA/RAWTEXT 完整狀態機** — `process_rcdata_rawtext()` 逐字元實作 6 個子狀態，取代 `find_end_tag()` 捷徑，修復 `</tag/>` self-closing end tag
 13. ✅ **`<input>` type=hidden 在 table 中的特殊處理** — 檢查 `type` 屬性（大小寫不敏感），直接插入 table 而不 foster parent
 14. ✅ **Select scope** — `has_element_in_select_scope()`，除 `optgroup`/`option` 外所有元素皆為障壁；`<select>` start/end tag 及 table element 在 select 模式中均使用
+15. ✅ **Noncharacter / surrogate / control 偵測** — `numeric_ref_adjust()` 完整實作 WHATWG §13.2.5.80：surrogate → U+FFFD，noncharacter → parse error + 保留，control → parse error + W-1252 映射/保留
 
 ### 剩餘待完成項目
 
 1. ~~**完整 parse error 報告**~~ ✅ — `tree_parse_error()` 已實作 ~40 種 tree construction parse error
 2. ~~**`<input>` type=hidden 在 table 中的特殊處理**~~ ✅
 3. ~~**Select scope**~~ ✅
-4. **`<frameset>` 模式** — 已淘汰，低優先
-5. **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody` 等
-6. **Stop parsing (§13.2.6.5)** — EOF 時的完整清理步驟
-7. **Noncharacter / surrogate 偵測** — 數字參考解碼後的範圍檢查
+4. ~~**Noncharacter / surrogate 偵測**~~ ✅
+5. **`<frameset>` 模式** — 已淘汰，低優先
+6. **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody` 等
+7. **Stop parsing (§13.2.6.5)** — EOF 時的完整清理步驟
