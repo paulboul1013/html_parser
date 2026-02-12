@@ -1375,7 +1375,11 @@ done:
             enter_raw_state(tz, out->name, TOKENIZE_RCDATA);
         } else if (strcmp(out->name, "script") == 0) {
             enter_raw_state(tz, out->name, TOKENIZE_SCRIPT_DATA);
-        } else if (strcmp(out->name, "style") == 0) {
+        } else if (strcmp(out->name, "style") == 0 ||
+                   strcmp(out->name, "xmp") == 0 ||
+                   strcmp(out->name, "iframe") == 0 ||
+                   strcmp(out->name, "noembed") == 0 ||
+                   strcmp(out->name, "noframes") == 0) {
             enter_raw_state(tz, out->name, TOKENIZE_RAWTEXT);
         } else if (strcmp(out->name, "plaintext") == 0) {
             tz->state = TOKENIZE_PLAINTEXT;
@@ -1489,7 +1493,11 @@ void tokenizer_init_with_context(tokenizer *tz, const char *input, const char *c
         set_raw_state(tz, lowered, TOKENIZE_RCDATA);
     } else if (strcmp(lowered, "script") == 0) {
         set_raw_state(tz, lowered, TOKENIZE_SCRIPT_DATA);
-    } else if (strcmp(lowered, "style") == 0) {
+    } else if (strcmp(lowered, "style") == 0 ||
+               strcmp(lowered, "xmp") == 0 ||
+               strcmp(lowered, "iframe") == 0 ||
+               strcmp(lowered, "noembed") == 0 ||
+               strcmp(lowered, "noframes") == 0) {
         set_raw_state(tz, lowered, TOKENIZE_RAWTEXT);
     }
 }

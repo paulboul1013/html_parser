@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head>
+
+<!-- Test 1: <title> in head (RCDATA) — character refs decoded, no tags -->
+<title>Hello &amp; <b>World</b></title>
+
+<!-- Test 2: <style> in head (RAWTEXT) — no character ref decoding, no tags -->
+<style>body { content: "&amp;" } .a > .b { }</style>
+
+</head><body>
+
+<!-- Test 3: <textarea> in body (RCDATA) — character refs decoded -->
+<textarea>line1 &lt;br&gt; line2 <p>not a tag</p></textarea>
+
+<!-- Test 4: <xmp> in body (RAWTEXT) — no decoding, no tags -->
+<xmp><b>bold &amp; stuff</b></xmp>
+
+<!-- Test 5: <iframe> in body (RAWTEXT) — content preserved as text -->
+<iframe><p>fallback &amp; content</p></iframe>
+
+<!-- Test 6: <noembed> in body (RAWTEXT) — content preserved as text -->
+<noembed><img src="test.png"> &amp; text</noembed>
+
+<!-- Test 7: <script> in body — script data content preserved -->
+<script>var x = "<b>not a tag</b>"; alert(x);</script>
+
+<!-- Test 8: formatting element before RCDATA — should NOT reconstruct -->
+<b>bold text</b>
+<title>title after bold</title>
+
+<p>after all</p>
+</body></html>

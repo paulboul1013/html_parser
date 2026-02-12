@@ -58,6 +58,7 @@ typedef enum {
     MODE_IN_SELECT,
     MODE_IN_SELECT_IN_TABLE,
     MODE_IN_TEMPLATE,
+    MODE_TEXT,
     MODE_AFTER_BODY,
     MODE_AFTER_AFTER_BODY
 } insertion_mode;
@@ -136,6 +137,19 @@ static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
                                    formatting_list *fmt, insertion_mode *mode,
                                    insertion_mode *template_mode_stack, int *template_mode_top,
                                    int *reprocess);
+
+/* Elements that trigger the "text" insertion mode (generic RCDATA/RAWTEXT/script) */
+static int triggers_text_mode(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "title") == 0 ||
+           strcmp(name, "textarea") == 0 ||
+           strcmp(name, "style") == 0 ||
+           strcmp(name, "script") == 0 ||
+           strcmp(name, "xmp") == 0 ||
+           strcmp(name, "iframe") == 0 ||
+           strcmp(name, "noembed") == 0 ||
+           strcmp(name, "noframes") == 0;
+}
 
 /* Form-associated elements — automatically linked to form_element_pointer */
 static int is_form_associated_element(const char *name) {
@@ -1822,6 +1836,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
     insertion_mode mode = MODE_INITIAL;
+    insertion_mode original_insertion_mode = MODE_INITIAL;
     doc_mode dmode = DOC_NO_QUIRKS;
     node *html = NULL;
     node *head = NULL;
@@ -1891,6 +1906,30 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                 mode = MODE_IN_TABLE;
                 reprocess = 1;
                 continue;
+            }
+
+            if (mode == MODE_TEXT) {
+                if (t->type == TOKEN_CHARACTER) {
+                    if (t->data && t->data[0] != '\0') {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_TEXT, NULL, t->data);
+                        node_append_child(parent, n);
+                    }
+                    break;
+                }
+                if (t->type == TOKEN_END_TAG) {
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    break;
+                }
+                if (t->type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-text");
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
             }
 
             switch (t->type) {
@@ -2573,6 +2612,13 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                 default:
                     break;
             }
+
+            /* After processing a start tag: enter MODE_TEXT if needed */
+            if (!reprocess && t->type == TOKEN_START_TAG && mode != MODE_TEXT &&
+                triggers_text_mode(t->name)) {
+                original_insertion_mode = mode;
+                mode = MODE_TEXT;
+            }
         }
     }
 
@@ -2586,6 +2632,7 @@ node *build_tree_from_input(const char *input) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
     insertion_mode mode = MODE_INITIAL;
+    insertion_mode original_insertion_mode = MODE_INITIAL;
     doc_mode dmode = DOC_NO_QUIRKS;
     node *html = NULL;
     node *head = NULL;
@@ -2671,6 +2718,30 @@ node *build_tree_from_input(const char *input) {
                 mode = MODE_IN_TABLE;
                 reprocess = 1;
                 continue;
+            }
+
+            if (mode == MODE_TEXT) {
+                if (t.type == TOKEN_CHARACTER) {
+                    if (t.data && t.data[0] != '\0') {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_TEXT, NULL, t.data);
+                        node_append_child(parent, n);
+                    }
+                    break;
+                }
+                if (t.type == TOKEN_END_TAG) {
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    break;
+                }
+                if (t.type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-text");
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
             }
 
             switch (t.type) {
@@ -3362,6 +3433,13 @@ node *build_tree_from_input(const char *input) {
                     token_free(&t);
                     return doc;
             }
+
+            /* After processing a start tag: enter MODE_TEXT if needed */
+            if (!reprocess && t.type == TOKEN_START_TAG && mode != MODE_TEXT &&
+                (tz.state == TOKENIZE_RCDATA || tz.state == TOKENIZE_RAWTEXT || tz.state == TOKENIZE_SCRIPT_DATA)) {
+                original_insertion_mode = mode;
+                mode = MODE_TEXT;
+            }
         }
 
         token_free(&t);
@@ -3374,6 +3452,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
     node_stack st;
     insertion_mode mode = MODE_IN_BODY;
+    insertion_mode original_insertion_mode = MODE_IN_BODY;
     formatting_list fmt = {0};
     insertion_mode template_mode_stack[64];
     int template_mode_top = 0;
@@ -3469,6 +3548,30 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                 mode = MODE_IN_TABLE;
                 reprocess = 1;
                 continue;
+            }
+
+            if (mode == MODE_TEXT) {
+                if (t.type == TOKEN_CHARACTER) {
+                    if (t.data && t.data[0] != '\0') {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_TEXT, NULL, t.data);
+                        node_append_child(parent, n);
+                    }
+                    break;
+                }
+                if (t.type == TOKEN_END_TAG) {
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    break;
+                }
+                if (t.type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-text");
+                    stack_pop(&st);
+                    mode = original_insertion_mode;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
             }
 
             switch (t.type) {
@@ -3965,6 +4068,13 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     }
                     text_buffer_free(&table_text);
                     return doc;
+            }
+
+            /* After processing a start tag: enter MODE_TEXT if needed */
+            if (!reprocess && t.type == TOKEN_START_TAG && mode != MODE_TEXT &&
+                (tz.state == TOKENIZE_RCDATA || tz.state == TOKENIZE_RAWTEXT || tz.state == TOKENIZE_SCRIPT_DATA)) {
+                original_insertion_mode = mode;
+                mode = MODE_TEXT;
             }
         }
 

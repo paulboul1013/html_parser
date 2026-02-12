@@ -143,7 +143,7 @@
 | in head noscript | ⬜ | `<noscript>` 在 `<head>` 中時，腳本未啟用的特殊模式 |
 | after head | 🔧 | 合併至 `in head` → `in body` 的轉換邏輯 |
 | in body | ✅ | |
-| text | ⬜ | WHATWG 定義的 generic RCDATA/RAWTEXT 內容模式 |
+| text | ✅ | WHATWG 定義的 generic RCDATA/RAWTEXT 內容模式；`original_insertion_mode` 保存/恢復 |
 | in table | ✅ | |
 | in table text | ✅ | 表格內文字特殊收集 + foster 規則 |
 | in caption | ✅ | |
@@ -392,7 +392,7 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 |------|--------|---------|--------|--------|
 | Tokenizer 狀態（80） | 80 | 0 | 0 | 100% |
 | Character References | 7/7 | 0 | 0 | 100% |
-| Insertion Modes（23） | 15 | 4 | 4 | ~83% |
+| Insertion Modes（23） | 16 | 4 | 3 | ~87% |
 | Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
 | Formatting / AFE | 10/10 | 0 | 0 | 100% |
 | Scope | 6/6 | 0 | 0 | 100% |
