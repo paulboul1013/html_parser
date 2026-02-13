@@ -140,7 +140,7 @@
 | before html | ✅ | |
 | before head | 🔧 | 合併至 `before html` / `in head` 處理 |
 | in head | ✅ | |
-| in head noscript | ⬜ | `<noscript>` 在 `<head>` 中時，腳本未啟用的特殊模式 |
+| in head noscript | ✅ | `<noscript>` 在 `<head>` 中時，腳本未啟用的特殊模式 |
 | after head | 🔧 | 合併至 `in head` → `in body` 的轉換邏輯 |
 | in body | ✅ | |
 | text | ✅ | WHATWG 定義的 generic RCDATA/RAWTEXT 內容模式；`original_insertion_mode` 保存/恢復 |
@@ -296,7 +296,7 @@
 | 功能 | 狀態 | 備註 |
 |------|------|------|
 | `<base>` / `<link>` / `<meta>` / `<style>` / `<title>` / `<script>` 在 head 中正確解析 | ✅ | |
-| `<noscript>` in head（scripting disabled） | ⬜ | |
+| `<noscript>` in head（scripting disabled） | ✅ | MODE_IN_HEAD_NOSCRIPT 完整實作 |
 | `<head>` 重複出現 → 忽略 | ✅ | |
 
 ### 6.2 `<body>` 相關
@@ -334,7 +334,7 @@
 | `<script>` 基本解析 | ✅ | |
 | `<script>` 執行 | ⬜ | N/A，純 Parser |
 | `document.write()` re-entrant parsing | ⬜ | N/A，純 Parser |
-| `<noscript>` 內容處理 | ⬜ | 需知道 scripting flag |
+| `<noscript>` 內容處理 | ✅ | scripting disabled → MODE_IN_HEAD_NOSCRIPT |
 
 ### 6.6 Foreign Content（§13.2.6.7）
 

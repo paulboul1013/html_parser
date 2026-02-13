@@ -48,6 +48,7 @@ typedef enum {
     MODE_INITIAL = 0,
     MODE_BEFORE_HTML,
     MODE_IN_HEAD,
+    MODE_IN_HEAD_NOSCRIPT,
     MODE_IN_BODY,
     MODE_IN_TABLE,
     MODE_IN_TABLE_TEXT,
@@ -955,9 +956,21 @@ static int is_head_element(const char *name) {
            strcmp(name, "link") == 0 ||
            strcmp(name, "meta") == 0 ||
            strcmp(name, "style") == 0 ||
+           strcmp(name, "noscript") == 0 ||
            strcmp(name, "template") == 0 ||
            strcmp(name, "title") == 0 ||
            strcmp(name, "script") == 0;
+}
+
+/* Elements that use "in head" rules inside <noscript> (WHATWG §13.2.6.4.4) */
+static int is_head_noscript_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "basefont") == 0 ||
+           strcmp(name, "bgsound") == 0 ||
+           strcmp(name, "link") == 0 ||
+           strcmp(name, "meta") == 0 ||
+           strcmp(name, "noframes") == 0 ||
+           strcmp(name, "style") == 0;
 }
 
 static void body_autoclose_on_start(node_stack *st, const char *tag_name, doc_mode dmode);
@@ -1987,6 +2000,82 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                 break;
             }
 
+            /* ---- In head noscript mode (WHATWG §13.2.6.4.4) ---- */
+            if (mode == MODE_IN_HEAD_NOSCRIPT) {
+                if (t->type == TOKEN_DOCTYPE) {
+                    tree_parse_error("stray-doctype-in-head-noscript");
+                    break;
+                }
+                if (t->type == TOKEN_COMMENT) {
+                    parent = current_node(&st, doc);
+                    n = node_create(NODE_COMMENT, NULL, t->data ? t->data : "");
+                    node_append_child(parent, n);
+                    break;
+                }
+                if (t->type == TOKEN_CHARACTER) {
+                    if (t->data && is_all_whitespace(t->data)) break;
+                    tree_parse_error("char-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t->type == TOKEN_START_TAG) {
+                    if (t->name && strcmp(t->name, "html") == 0) {
+                        tree_parse_error("unexpected-start-tag");
+                        break;
+                    }
+                    if (t->name && is_head_noscript_element(t->name)) {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t->name, NULL);
+                        attach_attrs(n, t->attrs, t->attr_count);
+                        node_append_child(parent, n);
+                        if (!t->self_closing && !is_void_element(t->name) &&
+                            strcmp(t->name, "basefont") != 0 && strcmp(t->name, "bgsound") != 0) {
+                            stack_push(&st, n);
+                        }
+                        if (triggers_text_mode(t->name)) {
+                            original_insertion_mode = mode;
+                            mode = MODE_TEXT;
+                        }
+                        break;
+                    }
+                    if (t->name && (strcmp(t->name, "head") == 0 || strcmp(t->name, "noscript") == 0)) {
+                        tree_parse_error("unexpected-start-tag-in-head-noscript");
+                        break;
+                    }
+                    tree_parse_error("unexpected-start-tag-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t->type == TOKEN_END_TAG) {
+                    if (t->name && strcmp(t->name, "noscript") == 0) {
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        break;
+                    }
+                    if (t->name && strcmp(t->name, "br") == 0) {
+                        tree_parse_error("end-tag-br-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        reprocess = 1;
+                        continue;
+                    }
+                    tree_parse_error("unexpected-end-tag-in-head-noscript");
+                    break;
+                }
+                if (t->type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
+            }
+
             /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
             if (t->type == TOKEN_EOF) {
                 switch (mode) {
@@ -1999,6 +2088,12 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     case MODE_BEFORE_HTML:
                         ensure_body(doc, &st, &html, &body);
                         mode = MODE_IN_BODY;
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_HEAD_NOSCRIPT:
+                        tree_parse_error("eof-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
                         reprocess = 1;
                         continue;
                     case MODE_IN_HEAD:
@@ -2109,6 +2204,15 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                             node_append_child(parent, tmpl);
                             open_template_element(&st, &fmt, &mode, template_mode_stack, &template_mode_top,
                                                   tmpl, t->self_closing);
+                            break;
+                        }
+                        if (t->name && strcmp(t->name, "noscript") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "noscript", NULL);
+                            attach_attrs(n, t->attrs, t->attr_count);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_HEAD_NOSCRIPT;
                             break;
                         }
                         if (!is_head_element(t->name)) {
@@ -2862,6 +2966,82 @@ node *build_tree_from_input(const char *input) {
                 break;
             }
 
+            /* ---- In head noscript mode (WHATWG §13.2.6.4.4) ---- */
+            if (mode == MODE_IN_HEAD_NOSCRIPT) {
+                if (t.type == TOKEN_DOCTYPE) {
+                    tree_parse_error("stray-doctype-in-head-noscript");
+                    break;
+                }
+                if (t.type == TOKEN_COMMENT) {
+                    parent = current_node(&st, doc);
+                    n = node_create(NODE_COMMENT, NULL, t.data ? t.data : "");
+                    node_append_child(parent, n);
+                    break;
+                }
+                if (t.type == TOKEN_CHARACTER) {
+                    if (t.data && is_all_whitespace(t.data)) break;
+                    tree_parse_error("char-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t.type == TOKEN_START_TAG) {
+                    if (t.name && strcmp(t.name, "html") == 0) {
+                        tree_parse_error("unexpected-start-tag");
+                        break;
+                    }
+                    if (t.name && is_head_noscript_element(t.name)) {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name, NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
+                        node_append_child(parent, n);
+                        if (!t.self_closing && !is_void_element(t.name) &&
+                            strcmp(t.name, "basefont") != 0 && strcmp(t.name, "bgsound") != 0) {
+                            stack_push(&st, n);
+                        }
+                        if (tz.state == TOKENIZE_RCDATA || tz.state == TOKENIZE_RAWTEXT || tz.state == TOKENIZE_SCRIPT_DATA) {
+                            original_insertion_mode = mode;
+                            mode = MODE_TEXT;
+                        }
+                        break;
+                    }
+                    if (t.name && (strcmp(t.name, "head") == 0 || strcmp(t.name, "noscript") == 0)) {
+                        tree_parse_error("unexpected-start-tag-in-head-noscript");
+                        break;
+                    }
+                    tree_parse_error("unexpected-start-tag-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t.type == TOKEN_END_TAG) {
+                    if (t.name && strcmp(t.name, "noscript") == 0) {
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "br") == 0) {
+                        tree_parse_error("end-tag-br-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        reprocess = 1;
+                        continue;
+                    }
+                    tree_parse_error("unexpected-end-tag-in-head-noscript");
+                    break;
+                }
+                if (t.type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
+            }
+
             /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
             if (t.type == TOKEN_EOF) {
                 switch (mode) {
@@ -2874,6 +3054,12 @@ node *build_tree_from_input(const char *input) {
                     case MODE_BEFORE_HTML:
                         ensure_body(doc, &st, &html, &body);
                         mode = MODE_IN_BODY;
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_HEAD_NOSCRIPT:
+                        tree_parse_error("eof-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
                         reprocess = 1;
                         continue;
                     case MODE_IN_HEAD:
@@ -2982,6 +3168,15 @@ node *build_tree_from_input(const char *input) {
                             node_append_child(parent, tmpl);
                             open_template_element(&st, &fmt, &mode, template_mode_stack, &template_mode_top,
                                                   tmpl, t.self_closing);
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "noscript") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "noscript", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_HEAD_NOSCRIPT;
                             break;
                         }
                         if (!is_head_element(t.name)) {
@@ -3755,9 +3950,91 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                 break;
             }
 
+            /* ---- In head noscript mode (WHATWG §13.2.6.4.4) ---- */
+            if (mode == MODE_IN_HEAD_NOSCRIPT) {
+                if (t.type == TOKEN_DOCTYPE) {
+                    tree_parse_error("stray-doctype-in-head-noscript");
+                    break;
+                }
+                if (t.type == TOKEN_COMMENT) {
+                    parent = current_node(&st, doc);
+                    n = node_create(NODE_COMMENT, NULL, t.data ? t.data : "");
+                    node_append_child(parent, n);
+                    break;
+                }
+                if (t.type == TOKEN_CHARACTER) {
+                    if (t.data && is_all_whitespace(t.data)) break;
+                    tree_parse_error("char-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t.type == TOKEN_START_TAG) {
+                    if (t.name && strcmp(t.name, "html") == 0) {
+                        tree_parse_error("unexpected-start-tag");
+                        break;
+                    }
+                    if (t.name && is_head_noscript_element(t.name)) {
+                        parent = current_node(&st, doc);
+                        n = node_create(NODE_ELEMENT, t.name, NULL);
+                        attach_attrs(n, t.attrs, t.attr_count);
+                        node_append_child(parent, n);
+                        if (!t.self_closing && !is_void_element(t.name) &&
+                            strcmp(t.name, "basefont") != 0 && strcmp(t.name, "bgsound") != 0) {
+                            stack_push(&st, n);
+                        }
+                        if (tz.state == TOKENIZE_RCDATA || tz.state == TOKENIZE_RAWTEXT || tz.state == TOKENIZE_SCRIPT_DATA) {
+                            original_insertion_mode = mode;
+                            mode = MODE_TEXT;
+                        }
+                        break;
+                    }
+                    if (t.name && (strcmp(t.name, "head") == 0 || strcmp(t.name, "noscript") == 0)) {
+                        tree_parse_error("unexpected-start-tag-in-head-noscript");
+                        break;
+                    }
+                    tree_parse_error("unexpected-start-tag-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                if (t.type == TOKEN_END_TAG) {
+                    if (t.name && strcmp(t.name, "noscript") == 0) {
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        break;
+                    }
+                    if (t.name && strcmp(t.name, "br") == 0) {
+                        tree_parse_error("end-tag-br-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        reprocess = 1;
+                        continue;
+                    }
+                    tree_parse_error("unexpected-end-tag-in-head-noscript");
+                    break;
+                }
+                if (t.type == TOKEN_EOF) {
+                    tree_parse_error("eof-in-head-noscript");
+                    stack_pop(&st);
+                    mode = MODE_IN_HEAD;
+                    reprocess = 1;
+                    continue;
+                }
+                break;
+            }
+
             /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
             if (t.type == TOKEN_EOF) {
                 switch (mode) {
+                    case MODE_IN_HEAD_NOSCRIPT:
+                        tree_parse_error("eof-in-head-noscript");
+                        stack_pop(&st);
+                        mode = MODE_IN_HEAD;
+                        reprocess = 1;
+                        continue;
                     case MODE_IN_TEMPLATE:
                         goto stop_parsing;
                     case MODE_IN_BODY:
@@ -3807,6 +4084,15 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                             node_append_child(parent, n);
                             open_template_element(&st, &fmt, &mode, template_mode_stack, &template_mode_top,
                                                   n, t.self_closing);
+                            break;
+                        }
+                        if (t.name && strcmp(t.name, "noscript") == 0) {
+                            parent = current_node(&st, doc);
+                            n = node_create(NODE_ELEMENT, "noscript", NULL);
+                            attach_attrs(n, t.attrs, t.attr_count);
+                            node_append_child(parent, n);
+                            stack_push(&st, n);
+                            mode = MODE_IN_HEAD_NOSCRIPT;
                             break;
                         }
                         if (t.name && !is_head_element(t.name)) {
