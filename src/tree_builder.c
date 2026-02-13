@@ -86,6 +86,20 @@ static const char *find_attr(const token_attr *attrs, size_t count, const char *
     return NULL;
 }
 
+/* WHATWG §13.2.6.5: elements allowed on the stack at EOF without parse error */
+static int is_eof_expected_element(const char *name) {
+    if (!name) return 0;
+    return strcmp(name, "dd") == 0 || strcmp(name, "dt") == 0 ||
+           strcmp(name, "li") == 0 || strcmp(name, "optgroup") == 0 ||
+           strcmp(name, "option") == 0 || strcmp(name, "p") == 0 ||
+           strcmp(name, "rb") == 0 || strcmp(name, "rp") == 0 ||
+           strcmp(name, "rt") == 0 || strcmp(name, "rtc") == 0 ||
+           strcmp(name, "tbody") == 0 || strcmp(name, "td") == 0 ||
+           strcmp(name, "tfoot") == 0 || strcmp(name, "th") == 0 ||
+           strcmp(name, "thead") == 0 || strcmp(name, "tr") == 0 ||
+           strcmp(name, "body") == 0 || strcmp(name, "html") == 0;
+}
+
 typedef enum {
     FMT_NONE = 0,
     FMT_A,
@@ -1636,6 +1650,14 @@ static int handle_in_template_mode(const token *t, node *doc, node_stack *st,
             *reprocess = 1;
             return 1;
 
+        case TOKEN_EOF:
+            if (!stack_has_open_named(st, "template"))
+                return 0;  /* no template on stack → let caller stop parsing */
+            tree_parse_error("eof-in-template");
+            close_template_element(st, fmt, mode, template_mode_stack, template_mode_top);
+            *reprocess = 1;
+            return 1;
+
         default:
             return 0;
     }
@@ -1930,6 +1952,67 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     continue;
                 }
                 break;
+            }
+
+            /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
+            if (t->type == TOKEN_EOF) {
+                switch (mode) {
+                    case MODE_INITIAL:
+                        tree_parse_error("eof-before-doctype");
+                        dmode = DOC_QUIRKS;
+                        mode = MODE_BEFORE_HTML;
+                        reprocess = 1;
+                        continue;
+                    case MODE_BEFORE_HTML:
+                        ensure_body(doc, &st, &html, &body);
+                        mode = MODE_IN_BODY;
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_HEAD:
+                        close_head(&st, &head, &mode);
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_TEMPLATE:
+                        /* handle_in_template_mode already handled it;
+                           reaching here means no template on stack → stop */
+                        goto stop_parsing;
+                    case MODE_IN_BODY:
+                    case MODE_IN_CAPTION:
+                    case MODE_IN_CELL:
+                    case MODE_IN_ROW:
+                    case MODE_IN_TABLE_BODY:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        for (size_t si = 0; si < st.size; si++) {
+                            node *sn = st.items[si];
+                            if (sn && sn->name && !is_eof_expected_element(sn->name)) {
+                                tree_parse_error("eof-with-open-elements");
+                                break;
+                            }
+                        }
+                        goto stop_parsing;
+                    case MODE_IN_TABLE:
+                    case MODE_IN_SELECT:
+                    case MODE_IN_SELECT_IN_TABLE:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        {
+                            node *cur = current_node(&st, doc);
+                            if (cur && cur->name && strcmp(cur->name, "html") != 0)
+                                tree_parse_error("eof-in-table");
+                        }
+                        goto stop_parsing;
+                    case MODE_AFTER_BODY:
+                    case MODE_AFTER_AFTER_BODY:
+                    default:
+                        goto stop_parsing;
+                }
             }
 
             switch (t->type) {
@@ -2610,7 +2693,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     break;
                 case TOKEN_EOF:
                 default:
-                    break;
+                    goto stop_parsing;
             }
 
             /* After processing a start tag: enter MODE_TEXT if needed */
@@ -2622,6 +2705,8 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
         }
     }
 
+stop_parsing:
+    while (st.size > 0) stack_pop(&st);
     text_buffer_free(&table_text);
     return doc;
 }
@@ -2742,6 +2827,65 @@ node *build_tree_from_input(const char *input) {
                     continue;
                 }
                 break;
+            }
+
+            /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
+            if (t.type == TOKEN_EOF) {
+                switch (mode) {
+                    case MODE_INITIAL:
+                        tree_parse_error("eof-before-doctype");
+                        dmode = DOC_QUIRKS;
+                        mode = MODE_BEFORE_HTML;
+                        reprocess = 1;
+                        continue;
+                    case MODE_BEFORE_HTML:
+                        ensure_body(doc, &st, &html, &body);
+                        mode = MODE_IN_BODY;
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_HEAD:
+                        close_head(&st, &head, &mode);
+                        reprocess = 1;
+                        continue;
+                    case MODE_IN_TEMPLATE:
+                        goto stop_parsing;
+                    case MODE_IN_BODY:
+                    case MODE_IN_CAPTION:
+                    case MODE_IN_CELL:
+                    case MODE_IN_ROW:
+                    case MODE_IN_TABLE_BODY:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        for (size_t si = 0; si < st.size; si++) {
+                            node *sn = st.items[si];
+                            if (sn && sn->name && !is_eof_expected_element(sn->name)) {
+                                tree_parse_error("eof-with-open-elements");
+                                break;
+                            }
+                        }
+                        goto stop_parsing;
+                    case MODE_IN_TABLE:
+                    case MODE_IN_SELECT:
+                    case MODE_IN_SELECT_IN_TABLE:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        {
+                            node *cur = current_node(&st, doc);
+                            if (cur && cur->name && strcmp(cur->name, "html") != 0)
+                                tree_parse_error("eof-in-table");
+                        }
+                        goto stop_parsing;
+                    case MODE_AFTER_BODY:
+                    case MODE_AFTER_AFTER_BODY:
+                    default:
+                        goto stop_parsing;
+                }
             }
 
             switch (t.type) {
@@ -3419,19 +3563,7 @@ node *build_tree_from_input(const char *input) {
                     break;
                 case TOKEN_EOF:
                 default:
-                    if (mode == MODE_IN_TABLE_TEXT && table_text.len > 0) {
-                        node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
-                        if (table_text_has_non_ws) {
-                            foster_insert(&st, doc, text);
-                        } else {
-                            node_append_child(current_node(&st, doc), text);
-                        }
-                        text_buffer_clear(&table_text);
-                        table_text_has_non_ws = 0;
-                    }
-                    text_buffer_free(&table_text);
-                    token_free(&t);
-                    return doc;
+                    goto stop_parsing;
             }
 
             /* After processing a start tag: enter MODE_TEXT if needed */
@@ -3444,6 +3576,22 @@ node *build_tree_from_input(const char *input) {
 
         token_free(&t);
     }
+
+stop_parsing:
+    while (st.size > 0) stack_pop(&st);
+    if (mode == MODE_IN_TABLE_TEXT && table_text.len > 0) {
+        node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
+        if (table_text_has_non_ws) {
+            foster_insert(&st, doc, text);
+        } else {
+            node_append_child(current_node(&st, doc), text);
+        }
+        text_buffer_clear(&table_text);
+        table_text_has_non_ws = 0;
+    }
+    text_buffer_free(&table_text);
+    token_free(&t);
+    return doc;
 }
 
 node *build_fragment_from_input(const char *input, const char *context_tag) {
@@ -3572,6 +3720,48 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     continue;
                 }
                 break;
+            }
+
+            /* ---- EOF handling (WHATWG §13.2.6.5 "The end") ---- */
+            if (t.type == TOKEN_EOF) {
+                switch (mode) {
+                    case MODE_IN_TEMPLATE:
+                        goto stop_parsing;
+                    case MODE_IN_BODY:
+                    case MODE_IN_CAPTION:
+                    case MODE_IN_CELL:
+                    case MODE_IN_ROW:
+                    case MODE_IN_TABLE_BODY:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        for (size_t si = 0; si < st.size; si++) {
+                            node *sn = st.items[si];
+                            if (sn && sn->name && !is_eof_expected_element(sn->name)) {
+                                tree_parse_error("eof-with-open-elements");
+                                break;
+                            }
+                        }
+                        goto stop_parsing;
+                    case MODE_IN_TABLE:
+                    case MODE_IN_SELECT:
+                    case MODE_IN_SELECT_IN_TABLE:
+                        if (template_mode_top > 0) {
+                            mode = MODE_IN_TEMPLATE;
+                            reprocess = 1;
+                            continue;
+                        }
+                        {
+                            node *cur = current_node(&st, doc);
+                            if (cur && cur->name && strcmp(cur->name, "html") != 0)
+                                tree_parse_error("eof-in-table");
+                        }
+                        goto stop_parsing;
+                    default:
+                        goto stop_parsing;
+                }
             }
 
             switch (t.type) {
@@ -4033,41 +4223,7 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
                     break;
                 case TOKEN_EOF:
                 default:
-                    token_free(&t);
-                    if (context) {
-                        node *adopt = context;
-                        if (context->name && strcmp(context->name, "template") == 0 &&
-                            context->first_child && context->first_child->name &&
-                            strcmp(context->first_child->name, "content") == 0) {
-                            adopt = context->first_child;
-                        }
-                        node *child = adopt->first_child;
-                        doc->first_child = child;
-                        doc->last_child = adopt->last_child;
-                        while (child) {
-                            child->parent = doc;
-                            if (!child->next_sibling) {
-                                doc->last_child = child;
-                            }
-                            child = child->next_sibling;
-                        }
-                        if (adopt != context) {
-                            node_free_shallow(adopt);
-                        }
-                        node_free_shallow(context);
-                    }
-                    if (mode == MODE_IN_TABLE_TEXT && table_text.len > 0) {
-                        node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
-                        if (table_text_has_non_ws) {
-                            foster_insert(&st, doc, text);
-                        } else {
-                            node_append_child(current_node(&st, doc), text);
-                        }
-                        text_buffer_clear(&table_text);
-                        table_text_has_non_ws = 0;
-                    }
-                    text_buffer_free(&table_text);
-                    return doc;
+                    goto stop_parsing;
             }
 
             /* After processing a start tag: enter MODE_TEXT if needed */
@@ -4080,4 +4236,42 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
 
         token_free(&t);
     }
+
+stop_parsing:
+    while (st.size > 0) stack_pop(&st);
+    token_free(&t);
+    if (context) {
+        node *adopt = context;
+        if (context->name && strcmp(context->name, "template") == 0 &&
+            context->first_child && context->first_child->name &&
+            strcmp(context->first_child->name, "content") == 0) {
+            adopt = context->first_child;
+        }
+        node *child = adopt->first_child;
+        doc->first_child = child;
+        doc->last_child = adopt->last_child;
+        while (child) {
+            child->parent = doc;
+            if (!child->next_sibling) {
+                doc->last_child = child;
+            }
+            child = child->next_sibling;
+        }
+        if (adopt != context) {
+            node_free_shallow(adopt);
+        }
+        node_free_shallow(context);
+    }
+    if (mode == MODE_IN_TABLE_TEXT && table_text.len > 0) {
+        node *text = node_create(NODE_TEXT, NULL, table_text.data ? table_text.data : "");
+        if (table_text_has_non_ws) {
+            foster_insert(&st, doc, text);
+        } else {
+            node_append_child(current_node(&st, doc), text);
+        }
+        text_buffer_clear(&table_text);
+        table_text_has_non_ws = 0;
+    }
+    text_buffer_free(&table_text);
+    return doc;
 }

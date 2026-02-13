@@ -1,0 +1,22 @@
+<!-- Test: Stop parsing (WHATWG §13.2.6.5) -->
+<!-- EOF with unclosed elements should trigger parse errors -->
+
+<!-- Case 1: Normal document - no unexpected open elements -->
+<!DOCTYPE html>
+<html>
+<head><title>Stop Parsing Test</title></head>
+<body>
+<p>Normal paragraph
+<div>
+  <p>Nested paragraph
+  <ul>
+    <li>Item 1
+    <li>Item 2
+  </ul>
+</div>
+</body>
+</html>
+
+<!-- Case 2: EOF with open non-expected element (span stays open) -->
+<!-- Should trigger "eof-with-open-elements" parse error -->
+</content>

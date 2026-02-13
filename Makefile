@@ -76,6 +76,8 @@ test-html: parse_html
 	./parse_html tests/rawtext_states.html
 	./parse_html tests/charref_nonchar.html
 	./parse_html tests/text_mode.html
+	./parse_html tests/stop_parsing.html
+	HTMLPARSER_PARSE_ERRORS=1 ./parse_html tests/stop_parsing_open.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

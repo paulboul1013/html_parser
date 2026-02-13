@@ -2,7 +2,7 @@
 
 本文件系統性地列出 WHATWG HTML Living Standard（§13 Parsing）中定義的所有解析相關功能，並標注本專案的實作狀態。
 
-**圖例**：✅ 已完成　⬜ 未實作　🔧 部分實作
+**圖例**：✅ 已完成　⬜ 未實作　🔧 部分實作 🟥 已淘汰
 
 ---
 
@@ -155,10 +155,10 @@
 | in select in table | ✅ | |
 | in template | 🔧 | 以 `template_mode_stack` + `content` wrapper 簡化實作 |
 | after body | ✅ | |
-| in frameset | ⬜ | `<frameset>` 模式，已淘汰 |
-| after frameset | ⬜ | |
+| in frameset | 🟥 | `<frameset>` 模式，已淘汰 |
+| after frameset | 🟥 | |
 | after after body | ✅ | |
-| after after frameset | ⬜ | |
+| after after frameset |🟥 | |
 
 **小結**：23 種模式中 15 種完整實作（含 in table text），4 種以合併方式實作（功能等效），4 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in head noscript）。
 
@@ -180,7 +180,7 @@
 | Generate implied end tags | ✅ | `dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc` |
 | Generate all implied end tags thoroughly | ⬜ | 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr` |
 | Reset the insertion mode appropriately | ✅ | Fragment 解析用 |
-| Stop parsing (§13.2.6.5) | ⬜ | 目前遇到 EOF 直接停止，未執行完整清理步驟 |
+| Stop parsing (§13.2.6.5) | ✅ | Per-mode EOF 處理、棧清理、parse error 報告 |
 
 ### 2.3 Formatting（活躍格式化元素）
 
