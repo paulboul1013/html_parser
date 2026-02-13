@@ -178,7 +178,7 @@
 | Adoption Agency Algorithm (§13.2.6.4) | ✅ | 完整 outer/inner loop |
 | Close the cell | ✅ | |
 | Generate implied end tags | ✅ | `dd`, `dt`, `li`, `optgroup`, `option`, `p`, `rb`, `rp`, `rt`, `rtc` |
-| Generate all implied end tags thoroughly | ⬜ | 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr` |
+| Generate all implied end tags thoroughly | ✅ | 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr` |
 | Reset the insertion mode appropriately | ✅ | Fragment 解析用 |
 | Stop parsing (§13.2.6.5) | ✅ | Per-mode EOF 處理、棧清理、parse error 報告 |
 

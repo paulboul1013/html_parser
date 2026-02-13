@@ -451,6 +451,28 @@ static void generate_implied_end_tags_except(node_stack *st, const char *except)
     }
 }
 
+static int is_implied_end_tag_element_thorough(const char *name) {
+    if (!name) return 0;
+    return is_implied_end_tag_element(name) ||
+           strcmp(name, "caption") == 0 ||
+           strcmp(name, "colgroup") == 0 ||
+           strcmp(name, "tbody") == 0 ||
+           strcmp(name, "td") == 0 ||
+           strcmp(name, "tfoot") == 0 ||
+           strcmp(name, "th") == 0 ||
+           strcmp(name, "thead") == 0 ||
+           strcmp(name, "tr") == 0;
+}
+
+static void generate_all_implied_end_tags_thoroughly(node_stack *st) {
+    while (st->size > 0) {
+        node *top = stack_top(st);
+        if (!top || !top->name || !is_implied_end_tag_element_thorough(top->name))
+            break;
+        stack_pop(st);
+    }
+}
+
 static void formatting_push(formatting_list *fl, fmt_tag tag, node *element) {
     if (!fl || tag == FMT_NONE || !element) return;
     size_t count_same = 0;
@@ -583,6 +605,12 @@ static void close_template_element(node_stack *st, formatting_list *fl, insertio
                                    insertion_mode *template_mode_stack, int *template_mode_top) {
     if (!st) return;
     (void)template_mode_stack;
+    generate_all_implied_end_tags_thoroughly(st);
+    {
+        node *top = stack_top(st);
+        if (!top || !top->name || strcmp(top->name, "template") != 0)
+            tree_parse_error("unexpected-element-before-template");
+    }
     stack_pop_until(st, "template");
     if (fl) formatting_clear_to_marker(fl);
     if (template_mode_top && *template_mode_top > 0) {
@@ -678,12 +706,17 @@ static int adoption_agency(node_stack *st, formatting_list *fl, node *doc,
     fmt_tag ft = fmt_tag_from_name(tag_name);
     if (ft == FMT_NONE) return 0;
 
-    /* WHATWG step 2: current node is the element and not in active list → simple pop */
+    /* WHATWG step 2: current node is the element and not in active list → thoroughly + pop */
     {
         node *cur = stack_top(st);
         if (cur && cur->name && strcmp(cur->name, tag_name) == 0 &&
             formatting_index_of_element(fl, cur) < 0) {
-            stack_pop(st);
+            generate_all_implied_end_tags_thoroughly(st);
+            cur = stack_top(st);
+            if (!cur || !cur->name || strcmp(cur->name, tag_name) != 0)
+                tree_parse_error("aaa-implied-mismatch");
+            if (cur && cur->name && strcmp(cur->name, tag_name) == 0)
+                stack_pop(st);
             return 1;
         }
     }
