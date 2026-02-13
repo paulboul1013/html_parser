@@ -6,13 +6,13 @@ SRC = src/token.c src/tokenizer.c src/tree.c src/tree_builder.c src/encoding.c s
 all: parse_html
 
 parse_html: $(SRC) src/parse_file_demo.c
-	$(CC) $(CFLAGS) -Isrc $(SRC) src/parse_file_demo.c -o $@
+	$(CC) $(CFLAGS) -Iinclude $(SRC) src/parse_file_demo.c -o $@
 
 parse_fragment_demo: $(SRC) src/parse_fragment_demo.c
-	$(CC) $(CFLAGS) -Isrc $(SRC) src/parse_fragment_demo.c -o $@
+	$(CC) $(CFLAGS) -Iinclude $(SRC) src/parse_fragment_demo.c -o $@
 
 serialize_demo: $(SRC) src/serialize_demo.c
-	$(CC) $(CFLAGS) -Isrc $(SRC) src/serialize_demo.c -o $@
+	$(CC) $(CFLAGS) -Iinclude $(SRC) src/serialize_demo.c -o $@
 
 test-html: parse_html
 	./parse_html tests/sample.html
