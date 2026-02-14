@@ -41,6 +41,50 @@ static void attach_attrs_svg(node *n, const token_attr *src, size_t count) {
     }
 }
 
+/* Extract charset from a <meta> element's attributes.
+ * Checks for: charset="..." or http-equiv="Content-Type" content="...charset=..."
+ * Returns canonical encoding name (static string) or NULL. */
+static const char *extract_meta_charset(const token_attr *attrs, size_t count) {
+    /* Check for charset attribute */
+    for (size_t i = 0; i < count; ++i) {
+        if (attrs[i].name && strcasecmp(attrs[i].name, "charset") == 0 && attrs[i].value) {
+            return encoding_resolve_label(attrs[i].value);
+        }
+    }
+    /* Check for http-equiv="Content-Type" content="...charset=..." */
+    const char *http_equiv = NULL;
+    const char *content = NULL;
+    for (size_t i = 0; i < count; ++i) {
+        if (attrs[i].name && strcasecmp(attrs[i].name, "http-equiv") == 0)
+            http_equiv = attrs[i].value;
+        if (attrs[i].name && strcasecmp(attrs[i].name, "content") == 0)
+            content = attrs[i].value;
+    }
+    if (http_equiv && content && strcasecmp(http_equiv, "Content-Type") == 0) {
+        /* Find "charset=" in content value */
+        const char *p = content;
+        while (*p) {
+            if (strncasecmp(p, "charset=", 8) == 0) {
+                p += 8;
+                /* Skip optional quotes */
+                char quote = 0;
+                if (*p == '"' || *p == '\'') { quote = *p; p++; }
+                const char *start = p;
+                while (*p && *p != ';' && *p != quote && *p != ' ') p++;
+                size_t len = (size_t)(p - start);
+                if (len > 0 && len < 128) {
+                    char label[128];
+                    memcpy(label, start, len);
+                    label[len] = '\0';
+                    return encoding_resolve_label(label);
+                }
+                return NULL;
+            }
+            p++;
+        }
+    }
+    return NULL;
+}
 
 #define STACK_MAX 256
 
@@ -2848,7 +2892,9 @@ stop_parsing:
     return doc;
 }
 
-node *build_tree_from_input(const char *input, const char *encoding) {
+node *build_tree_from_input(const char *input, const char *encoding,
+                            encoding_confidence confidence,
+                            const char **change_encoding) {
     tokenizer tz;
     token t;
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
@@ -2866,9 +2912,11 @@ node *build_tree_from_input(const char *input, const char *encoding) {
     int table_text_has_non_ws = 0;
     node *form_element_pointer = NULL;
 
+    if (change_encoding) *change_encoding = NULL;
     if (!doc) return NULL;
     if (encoding)
         doc->encoding = strdup(encoding);
+    doc->enc_confidence = confidence;
     stack_init(&st);
     text_buffer_init(&table_text);
     tokenizer_init(&tz, input);
@@ -3345,6 +3393,18 @@ node *build_tree_from_input(const char *input, const char *encoding) {
                         node_append_child(parent, n);
                         if (!t.self_closing && !is_void_element(t.name)) {
                             stack_push(&st, n);
+                        }
+                        /* WHATWG §13.2.3.5: change the encoding */
+                        if (t.name && strcmp(t.name, "meta") == 0 &&
+                            confidence == ENC_CONFIDENCE_TENTATIVE && change_encoding) {
+                            const char *meta_enc = extract_meta_charset(t.attrs, t.attr_count);
+                            if (meta_enc && (!doc->encoding || strcmp(meta_enc, doc->encoding) != 0)) {
+                                *change_encoding = meta_enc;
+                                token_free(&t);
+                                text_buffer_free(&table_text);
+                                node_free(doc);
+                                return NULL;
+                            }
                         }
                     } else if (mode == MODE_IN_TABLE_BODY) {
                         if (t.name && is_table_section_element(t.name)) {
@@ -3825,7 +3885,9 @@ stop_parsing:
 }
 
 node *build_fragment_from_input(const char *input, const char *context_tag,
-                                const char *encoding) {
+                                const char *encoding,
+                                encoding_confidence confidence,
+                                const char **change_encoding) {
     tokenizer tz;
     token t;
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
@@ -3840,10 +3902,12 @@ node *build_fragment_from_input(const char *input, const char *context_tag,
     node *form_element_pointer = NULL;
     node *context = NULL;
 
+    if (change_encoding) *change_encoding = NULL;
     if (!doc) return NULL;
     /* WHATWG §14.4 step 5: inherit encoding from context element's document */
     if (encoding)
         doc->encoding = strdup(encoding);
+    doc->enc_confidence = confidence;
     stack_init(&st);
     text_buffer_init(&table_text);
 

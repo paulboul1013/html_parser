@@ -266,7 +266,7 @@
 | `replacement` 編碼 → U+FFFD | ✅ | |
 | `x-user-defined` 轉換 | ✅ | |
 | Encoding confidence（certain / tentative / irrelevant） | ✅ | |
-| Re-encoding（meta 與 BOM 不符時的重新解碼） | ⬜ | 目前以第一個匹配結果為準 |
+| Re-encoding（meta 與 BOM 不符時的重新解碼） | ✅ | WHATWG §13.2.3.5: TENTATIVE 時偵測 meta charset 觸發重新解碼 |
 | `ISO-2022-JP` encoder state machine | ⬜ | iconv 處理，未自行實作 |
 
 ---

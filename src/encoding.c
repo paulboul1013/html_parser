@@ -852,9 +852,7 @@ encoding_result encoding_sniff_and_convert(const unsigned char *raw,
         result.data[data_len] = '\0';
         result.len = data_len;
         result.encoding = "UTF-8";
-        result.confidence = (confidence == ENC_CONFIDENCE_CERTAIN)
-                            ? ENC_CONFIDENCE_CERTAIN
-                            : ENC_CONFIDENCE_IRRELEVANT;
+        result.confidence = confidence;
         return result;
     }
 

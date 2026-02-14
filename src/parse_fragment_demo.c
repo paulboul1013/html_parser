@@ -6,40 +6,21 @@
 #include "tokenizer.h"
 #include "encoding.h"
 
-static char *read_file(const char *path, const char *charset_hint,
-                       const char **out_encoding) {
+/* Read raw file bytes. Caller must free *out_buf. */
+static size_t read_file_raw(const char *path, char **out_buf) {
     FILE *fp = fopen(path, "rb");
-    long len;
-    size_t read_len;
-    char *raw;
-    char *buf;
-    if (!fp) return NULL;
+    if (!fp) return 0;
     fseek(fp, 0, SEEK_END);
-    len = ftell(fp);
+    long len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    if (len < 0) {
-        fclose(fp);
-        return NULL;
-    }
-    raw = (char *)malloc((size_t)len + 1);
-    if (!raw) {
-        fclose(fp);
-        return NULL;
-    }
-    read_len = fread(raw, 1, (size_t)len, fp);
+    if (len < 0) { fclose(fp); return 0; }
+    char *buf = (char *)malloc((size_t)len + 1);
+    if (!buf) { fclose(fp); return 0; }
+    size_t read_len = fread(buf, 1, (size_t)len, fp);
     fclose(fp);
-    /* Encoding sniffing and conversion to UTF-8 */
-    encoding_result enc = encoding_sniff_and_convert(
-        (const unsigned char *)raw, read_len, charset_hint);
-    free(raw);
-    if (!enc.data) return NULL;
-    /* Return the detected encoding to the caller */
-    if (out_encoding)
-        *out_encoding = enc.encoding;
-    /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
-    buf = tokenizer_replace_nulls(enc.data, enc.len);
-    free(enc.data);
-    return buf;
+    buf[read_len] = '\0';
+    *out_buf = buf;
+    return read_len;
 }
 
 int main(int argc, char **argv) {
@@ -54,15 +35,36 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s [--charset ENC] <context-tag> <file>\n", argv[0]);
         return 1;
     }
-    const char *context = argv[arg_idx];
+    const char *context_tag = argv[arg_idx];
     const char *path = argv[arg_idx + 1];
-    const char *encoding = NULL;
-    char *input = read_file(path, charset_hint, &encoding);
-    if (!input) {
+
+    /* Read raw bytes */
+    char *raw = NULL;
+    size_t raw_len = read_file_raw(path, &raw);
+    if (!raw) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;
     }
-    node *doc = build_fragment_from_input(input, context, encoding);
+
+    /* Encoding sniff and convert */
+    encoding_result enc = encoding_sniff_and_convert(
+        (const unsigned char *)raw, raw_len, charset_hint);
+    free(raw);
+    if (!enc.data) {
+        fprintf(stderr, "encoding conversion failed for %s\n", path);
+        return 1;
+    }
+
+    char *input = tokenizer_replace_nulls(enc.data, enc.len);
+    free(enc.data);
+    const char *encoding = enc.encoding;
+    encoding_confidence confidence = enc.confidence;
+
+    /* Fragment parsing inherits encoding from context document.
+     * Re-encoding is not applicable for fragments (encoding comes
+     * from context element's document), so pass NULL for change_encoding. */
+    node *doc = build_fragment_from_input(input, context_tag, encoding,
+                                          confidence, NULL);
     if (!doc) {
         fprintf(stderr, "failed to build fragment\n");
         free(input);

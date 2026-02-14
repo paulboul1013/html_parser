@@ -2,6 +2,7 @@
 #define HTML_PARSER_TREE_H
 
 #include <stddef.h>
+#include "encoding.h"
 
 typedef enum {
     NODE_DOCUMENT = 1,
@@ -34,7 +35,8 @@ typedef struct node {
     struct node *last_child;
     struct node *next_sibling;
     struct node *form_owner; /* form element pointer association (non-owning) */
-    char *encoding;          /* document encoding (only meaningful on NODE_DOCUMENT) */
+    char *encoding;              /* document encoding (only meaningful on NODE_DOCUMENT) */
+    encoding_confidence enc_confidence; /* encoding confidence level */
 } node;
 
 node *node_create(node_type type, const char *name, const char *data);
