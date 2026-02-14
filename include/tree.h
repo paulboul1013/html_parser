@@ -34,6 +34,7 @@ typedef struct node {
     struct node *last_child;
     struct node *next_sibling;
     struct node *form_owner; /* form element pointer association (non-owning) */
+    char *encoding;          /* document encoding (only meaningful on NODE_DOCUMENT) */
 } node;
 
 node *node_create(node_type type, const char *name, const char *data);

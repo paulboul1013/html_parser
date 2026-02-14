@@ -2848,7 +2848,7 @@ stop_parsing:
     return doc;
 }
 
-node *build_tree_from_input(const char *input) {
+node *build_tree_from_input(const char *input, const char *encoding) {
     tokenizer tz;
     token t;
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
@@ -2867,6 +2867,8 @@ node *build_tree_from_input(const char *input) {
     node *form_element_pointer = NULL;
 
     if (!doc) return NULL;
+    if (encoding)
+        doc->encoding = strdup(encoding);
     stack_init(&st);
     text_buffer_init(&table_text);
     tokenizer_init(&tz, input);
@@ -3822,7 +3824,8 @@ stop_parsing:
     return doc;
 }
 
-node *build_fragment_from_input(const char *input, const char *context_tag) {
+node *build_fragment_from_input(const char *input, const char *context_tag,
+                                const char *encoding) {
     tokenizer tz;
     token t;
     node *doc = node_create(NODE_DOCUMENT, NULL, NULL);
@@ -3838,6 +3841,9 @@ node *build_fragment_from_input(const char *input, const char *context_tag) {
     node *context = NULL;
 
     if (!doc) return NULL;
+    /* WHATWG §14.4 step 5: inherit encoding from context element's document */
+    if (encoding)
+        doc->encoding = strdup(encoding);
     stack_init(&st);
     text_buffer_init(&table_text);
 

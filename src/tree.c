@@ -118,6 +118,7 @@ void node_free_shallow(node *n) {
     if (!n) return;
     free(n->name);
     free(n->data);
+    free(n->encoding);
     free_node_attrs(n->attrs, n->attr_count);
     free(n);
 }
@@ -134,6 +135,7 @@ void node_free(node *n) {
     }
     free(n->name);
     free(n->data);
+    free(n->encoding);
     free_node_attrs(n->attrs, n->attr_count);
     free(n);
 }
@@ -204,7 +206,10 @@ void tree_dump_ascii(const node *root, const char *title) {
     if (title && title[0]) {
         printf("%s\n", title);
     }
-    printf("%s\n", node_type_name(root->type));
+    printf("%s", node_type_name(root->type));
+    if (root->encoding)
+        printf(" encoding=\"%s\"", root->encoding);
+    printf("\n");
     for (const node *child = root->first_child; child; child = child->next_sibling) {
         int last = (child->next_sibling == NULL);
         dump_node(child, "", last);

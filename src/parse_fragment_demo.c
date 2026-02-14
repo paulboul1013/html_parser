@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "tree_builder.h"
 #include "tokenizer.h"
 #include "encoding.h"
 
-static char *read_file(const char *path) {
+static char *read_file(const char *path, const char *charset_hint,
+                       const char **out_encoding) {
     FILE *fp = fopen(path, "rb");
     long len;
     size_t read_len;
@@ -28,9 +30,12 @@ static char *read_file(const char *path) {
     fclose(fp);
     /* Encoding sniffing and conversion to UTF-8 */
     encoding_result enc = encoding_sniff_and_convert(
-        (const unsigned char *)raw, read_len, NULL);
+        (const unsigned char *)raw, read_len, charset_hint);
     free(raw);
     if (!enc.data) return NULL;
+    /* Return the detected encoding to the caller */
+    if (out_encoding)
+        *out_encoding = enc.encoding;
     /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
     buf = tokenizer_replace_nulls(enc.data, enc.len);
     free(enc.data);
@@ -38,18 +43,26 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        fprintf(stderr, "usage: %s <context-tag> <file>\n", argv[0]);
+    const char *charset_hint = NULL;
+    int arg_idx = 1;
+    /* Parse --charset option */
+    if (argc > 2 && strcmp(argv[1], "--charset") == 0) {
+        charset_hint = argv[2];
+        arg_idx = 3;
+    }
+    if (argc - arg_idx < 2) {
+        fprintf(stderr, "usage: %s [--charset ENC] <context-tag> <file>\n", argv[0]);
         return 1;
     }
-    const char *context = argv[1];
-    const char *path = argv[2];
-    char *input = read_file(path);
+    const char *context = argv[arg_idx];
+    const char *path = argv[arg_idx + 1];
+    const char *encoding = NULL;
+    char *input = read_file(path, charset_hint, &encoding);
     if (!input) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;
     }
-    node *doc = build_fragment_from_input(input, context);
+    node *doc = build_fragment_from_input(input, context, encoding);
     if (!doc) {
         fprintf(stderr, "failed to build fragment\n");
         free(input);

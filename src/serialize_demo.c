@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;
     }
-    node *doc = build_tree_from_input(input);
+    node *doc = build_tree_from_input(input, NULL);
     if (!doc) {
         fprintf(stderr, "failed to build tree\n");
         free(input);

@@ -60,7 +60,7 @@ echo "  =============================="
 run "01  tr/td in body -> ignored" \
     div tests/frag_01_table_in_div.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 \-- TEXT data="A"
 EOF
 
@@ -72,7 +72,7 @@ EOF
 run "02a <td> in table context -> tbody+tr implied" \
     table tests/frag_02_td_x.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 \-- ELEMENT name="tbody"
     \-- ELEMENT name="tr"
         \-- ELEMENT name="td"
@@ -85,7 +85,7 @@ EOF
 run "02b <td> in tr context -> direct" \
     tr tests/frag_02_td_x.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 \-- ELEMENT name="td"
     \-- TEXT data="X"
 EOF
@@ -100,7 +100,7 @@ EOF
 run "03  foster parenting (text + p inside table)" \
     div tests/frag_03_foster_in_div.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- TEXT data="1"
 |-- ELEMENT name="p"
 |-- TEXT data="2"
@@ -117,7 +117,7 @@ EOF
 run "04  formatting misnest <b><i>X</b>Y</i>" \
     div tests/frag_04_formatting_misnest.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="b"
 |   \-- ELEMENT name="i"
 |       \-- TEXT data="X"
@@ -131,7 +131,7 @@ EOF
 run "05  <p> closed by <table>, tbody implied" \
     div tests/frag_05_p_table_close.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="p"
 |   \-- TEXT data="A"
 |-- ELEMENT name="table"
@@ -149,7 +149,7 @@ EOF
 run "06  <option> auto-close in select" \
     select tests/frag_06_option_autoclose.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="option"
 |   \-- TEXT data="A"
 \-- ELEMENT name="option"
@@ -166,7 +166,7 @@ EOF
 run "07  <p> inside <button> (valid per spec)" \
     div tests/frag_07_button_p.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="button"
 |   \-- ELEMENT name="p"
 |       \-- TEXT data="X"
@@ -184,7 +184,7 @@ EOF
 run "08  script data state" \
     div tests/frag_08_script_data.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="script"
 |   \-- TEXT data="var x=""
 \-- TEXT data="";"
@@ -198,7 +198,7 @@ EOF
 run "09  textarea RCDATA (tags become text)" \
     div tests/frag_09_textarea_rcdata.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 \-- ELEMENT name="textarea"
     \-- TEXT data="<b>X</b>"
 EOF
@@ -212,7 +212,7 @@ EOF
 run "10  template content DocumentFragment" \
     div tests/frag_10_template.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="template"
 |   \-- ELEMENT name="content"
 |       \-- ELEMENT name="p"
@@ -228,7 +228,7 @@ EOF
 run "11  void element <meta> not pushed to stack" \
     div tests/frag_11_head_in_body.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="meta" [charset="utf-8"]
 \-- ELEMENT name="title"
     \-- TEXT data="X"
@@ -246,7 +246,7 @@ EOF
 run "12  mixed scope (table + fmt + p)" \
     div tests/frag_12_mixed_scope.html pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 |-- ELEMENT name="table"
 |   \-- ELEMENT name="tbody"
 |       \-- ELEMENT name="tr"
@@ -267,7 +267,7 @@ printf 'A\r\nB\rC' > "$tmp_crlf"
 run "13  CR/LF normalization" \
     div "$tmp_crlf" pass <<'EOF'
 ASCII Tree (Fragment)
-DOCUMENT
+DOCUMENT encoding="UTF-8"
 \-- TEXT data="A\nB\nC"
 EOF
 rm -f "$tmp_crlf"

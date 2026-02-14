@@ -6,7 +6,8 @@
 #include "tokenizer.h"
 #include "encoding.h"
 
-static char *read_file(const char *path, const char *charset_hint) {
+static char *read_file(const char *path, const char *charset_hint,
+                       const char **out_encoding) {
     FILE *fp = fopen(path, "rb");
     long len;
     size_t read_len;
@@ -32,6 +33,9 @@ static char *read_file(const char *path, const char *charset_hint) {
         (const unsigned char *)raw, read_len, charset_hint);
     free(raw);
     if (!enc.data) return NULL;
+    /* Return the detected encoding to the caller */
+    if (out_encoding)
+        *out_encoding = enc.encoding;
     /* Replace U+0000 NULL bytes with U+FFFD before tokenization */
     buf = tokenizer_replace_nulls(enc.data, enc.len);
     free(enc.data);
@@ -47,12 +51,13 @@ int main(int argc, char **argv) {
         arg_idx = 3;
     }
     const char *path = (argc > arg_idx) ? argv[arg_idx] : "tests/sample.html";
-    char *input = read_file(path, charset_hint);
+    const char *encoding = NULL;
+    char *input = read_file(path, charset_hint, &encoding);
     if (!input) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;
     }
-    node *doc = build_tree_from_input(input);
+    node *doc = build_tree_from_input(input, encoding);
     if (!doc) {
         fprintf(stderr, "failed to build tree\n");
         free(input);
