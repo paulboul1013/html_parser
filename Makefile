@@ -78,7 +78,8 @@ test-html: parse_html
 # 	./parse_html tests/text_mode.html
 # 	./parse_html tests/stop_parsing.html
 # 	HTMLPARSER_PARSE_ERRORS=1 ./parse_html tests/stop_parsing_open.html
-	./parse_html tests/noscript_in_head.html
+# 	./parse_html tests/noscript_in_head.html
+	./parse_html tests/merge_attrs.html
 
 test-fragment: parse_fragment_demo
 	bash tests/run_fragment_tests.sh ./parse_fragment_demo

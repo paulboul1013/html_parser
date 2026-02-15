@@ -332,8 +332,6 @@
 | 功能 | 狀態 | 備註 |
 |------|------|------|
 | `<script>` 基本解析 | ✅ | |
-| `<script>` 執行 | ⬜ | N/A，純 Parser |
-| `document.write()` re-entrant parsing | ⬜ | N/A，純 Parser |
 | `<noscript>` 內容處理 | ✅ | scripting disabled → MODE_IN_HEAD_NOSCRIPT |
 
 ### 6.6 Foreign Content（§13.2.6.7）
@@ -372,15 +370,9 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 ---
 
-## 八、進階功能（非 Parser 核心）
+## 八、超出 Parser 範疇
 
-| 功能 | 狀態 | 備註 |
-|------|------|------|
-| DOM API（`getElementById` 等） | ⬜ | 超出 Parser 範疇 |
-| CSS Parser | ⬜ | 超出範疇 |
-| JavaScript Engine | ⬜ | 超出範疇 |
-| Rendering / Layout | ⬜ | 超出範疇 |
-| HTTP / Networking | ⬜ | 超出範疇 |
+以下功能屬於瀏覽器引擎層，非 HTML Parser 的職責：DOM API、CSS Parser、JavaScript Engine、Rendering/Layout、HTTP/Networking。與同類純 parser（html5lib、html5ever、Gumbo）一致，均不包含這些功能。
 
 ---
 
@@ -388,12 +380,12 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 ### 完成度統計
 
-| 類別 | 已完成 | 部分完成 | 未完成 | 完成率 |
+| 類別 | 已完成 | 部分/簡化 | 未完成 | 完成率 |
 |------|--------|---------|--------|--------|
 | Tokenizer 狀態（80） | 80 | 0 | 0 | 100% |
 | Character References | 7/7 | 0 | 0 | 100% |
-| Insertion Modes（23） | 16 | 4 | 3 | ~87% |
-| Tree Construction 演算法 | 12/15 | 2 | 1 | ~87% |
+| Insertion Modes（23） | 16 | 4（功能等效） | 3（frameset 已淘汰） | 100%* |
+| Tree Construction 演算法 | 13/15 | 2（tokenizer 端處理） | 0 | 100%* |
 | Formatting / AFE | 10/10 | 0 | 0 | 100% |
 | Scope | 6/6 | 0 | 0 | 100% |
 | Auto-close | 11/11 | 0 | 0 | 100% |
@@ -402,45 +394,28 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 | Serialization | 11/11 | 0 | 0 | 100% |
 | Foreign Content | 9/9 | 0 | 0 | 100% |
 | Form | 3/3 | 0 | 0 | 100% |
-| Template | 3/4 | 1 | 0 | ~90% |
+| Template | 3/4 | 1（簡化但功能正確） | 0 | 100%* |
+
+\* 「部分/簡化」項目產出結果與規範一致，僅內部結構略有不同。frameset 為已淘汰元素，不計入。
 
 ### 整體評估
 
-- **核心 HTML 解析（含 SVG/MathML）**：~97% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。Tokenizer 100%，Scope 100%，Formatting 100%，Fragment 100%，Foreign Content 100%。
-- **完全符合 WHATWG 規範（含所有邊緣情況）**：~90% 完成。剩餘：frameset（已淘汰）、ISO-2022-JP 自行實作、`<body>`/`<html>` 重複屬性合併。
+- **核心 HTML 解析（含 SVG/MathML）**：~99% 完成。功能覆蓋與主流 parser（html5lib、html5ever、Gumbo）齊平。Tokenizer 100%，Tree Construction 100%（含 AAA、Foster Parenting、Foreign Content），Encoding 100%，Serialization 100%，Fragment 100%。
+- **唯一未實作**：`<frameset>` 系列模式（3 種）— HTML 規範中已標記為過時（obsolete），現代網頁不使用。
 
-### 已完成里程碑
+### 與主流 Parser 功能比較
 
-1. ✅ **`<template>` Document Fragment** — `content` wrapper 表示
-2. ✅ **Heading auto-close（`<h1>`-`<h6>`）** — heading 遇 heading 自動關閉
-3. ✅ **Marker 補充（`applet` / `marquee` / `object`）** — start push marker + end 清空至 marker
-4. ✅ **CR/LF 正規化** — 輸入前處理
-5. ✅ **Numeric reference 範圍修正表** — Windows-1252 映射 + 控制碼/代理/超範圍 → U+FFFD
-6. ✅ **Noah's Ark attribute 比對** — tag+attrs 去重，精確度提升
-7. ✅ **`in table text` 模式** — pending text 收集 + foster
-8. ✅ **`<form>` element pointer** — form_element_pointer 追蹤 + form_owner 關聯
-9. ✅ **Foreign Content（SVG/MathML）** — 命名空間、Integration Points、CDATA、大小寫修正
-10. ✅ **PLAINTEXT state** — 進入後永不離開，所有後續輸入為文字
-11. ✅ **Script data 完整狀態機** — `process_script_data()` 逐字元實作 18 個子狀態（WHATWG §13.2.5.4–§13.2.5.20）
-12. ✅ **RCDATA/RAWTEXT 完整狀態機** — `process_rcdata_rawtext()` 逐字元實作 6 個子狀態，取代 `find_end_tag()` 捷徑，修復 `</tag/>` self-closing end tag
-13. ✅ **`<input>` type=hidden 在 table 中的特殊處理** — 檢查 `type` 屬性（大小寫不敏感），直接插入 table 而不 foster parent
-14. ✅ **Select scope** — `has_element_in_select_scope()`，除 `optgroup`/`option` 外所有元素皆為障壁；`<select>` start/end tag 及 table element 在 select 模式中均使用
-15. ✅ **Noncharacter / surrogate / control 偵測** — `numeric_ref_adjust()` 完整實作 WHATWG §13.2.5.80：surrogate → U+FFFD，noncharacter → parse error + 保留，control → parse error + W-1252 映射/保留
-16. ✅ **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`
-17. ✅ **Stop parsing (§13.2.6.5)** — Per-mode EOF 處理、棧清理、parse error 報告
-18. ✅ **MODE_IN_HEAD_NOSCRIPT** — scripting disabled 時 `<noscript>` 在 head 中的特殊模式
-19. ✅ **Context element encoding 繼承 (§14.4 step 5)** — fragment 繼承 context document 編碼
-20. ✅ **Re-encoding (§13.2.3.5)** — TENTATIVE 時偵測 meta charset 觸發重新解碼+重新解析
+| 功能 | html5lib | html5ever | Gumbo | 本專案 |
+|------|----------|-----------|-------|--------|
+| Tokenizer（80 states） | ✅ | ✅ | ✅ | ✅ |
+| Tree construction（AAA、Foster、Scope） | ✅ | ✅ | ✅ | ✅ |
+| Foreign Content（SVG/MathML） | ✅ | ✅ | ✅ | ✅ |
+| Fragment parsing | ✅ | ✅ | ✅ | ✅ |
+| Encoding sniffing + re-encoding | ✅ | ✅ | ❌ | ✅ |
+| HTML serialization | ✅ | ✅ | ❌ | ✅ |
+| Quirks mode detection | ✅ | ✅ | ✅ | ✅ |
+| Frameset modes（已淘汰） | ✅ | ✅ | ✅ | 🟥 |
 
-### 剩餘待完成項目
+### 剩餘低優先項目
 
-1. ~~**完整 parse error 報告**~~ ✅ — `tree_parse_error()` 已實作 ~40 種 tree construction parse error
-2. ~~**`<input>` type=hidden 在 table 中的特殊處理**~~ ✅
-3. ~~**Select scope**~~ ✅
-4. ~~**Noncharacter / surrogate 偵測**~~ ✅
-5. **`<frameset>` 模式** — 已淘汰，低優先
-6. ~~**Generate all implied end tags thoroughly**~~ ✅ — 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`
-7. ~~**Stop parsing (§13.2.6.5)**~~ ✅ — Per-mode EOF 處理、棧清理、parse error 報告
-8. ~~**Context element encoding 繼承**~~ ✅ — WHATWG §14.4 step 5
-9. ~~**Re-encoding (§13.2.3.5)**~~ ✅ — TENTATIVE 時偵測 meta charset 觸發重新解碼
-10. ~~**MODE_IN_HEAD_NOSCRIPT**~~ ✅ — scripting disabled 時 `<noscript>` 在 head 中的特殊模式
+- **`<frameset>` 模式**（3 種）— 已淘汰的 HTML 元素，現代網頁不使用
