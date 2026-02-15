@@ -9,6 +9,8 @@
 #include <iconv.h>
 #endif
 
+#include "jis0208_table.h"
+
 /* ========================================================================
  * Encoding label lookup table (WHATWG Encoding Standard)
  * Sorted by label for bsearch(). ~230 entries covering all 39 encodings.
@@ -691,6 +693,293 @@ static char *convert_x_user_defined(const unsigned char *raw, size_t raw_len,
     return out;
 }
 
+/* ========================================================================
+ * Built-in ISO-2022-JP decoder (WHATWG Encoding Standard §15.2)
+ * State machine: ASCII, Roman, Katakana, Lead byte, Trail byte, Escape
+ * ======================================================================== */
+
+/* Helper: append a Unicode codepoint as UTF-8 to output buffer.
+ * Grows buffer if needed. Returns 0 on success, -1 on alloc failure. */
+static int iso2022jp_emit_cp(char **out, size_t *olen, size_t *cap,
+                              unsigned int cp) {
+    /* ensure space for max 4 UTF-8 bytes */
+    if (*olen + 4 > *cap) {
+        *cap *= 2;
+        char *tmp = (char *)realloc(*out, *cap);
+        if (!tmp) return -1;
+        *out = tmp;
+    }
+    if (cp < 0x80) {
+        (*out)[(*olen)++] = (char)cp;
+    } else if (cp < 0x800) {
+        (*out)[(*olen)++] = (char)(0xC0 | (cp >> 6));
+        (*out)[(*olen)++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        (*out)[(*olen)++] = (char)(0xE0 | (cp >> 12));
+        (*out)[(*olen)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        (*out)[(*olen)++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+        (*out)[(*olen)++] = (char)(0xF0 | (cp >> 18));
+        (*out)[(*olen)++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        (*out)[(*olen)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        (*out)[(*olen)++] = (char)(0x80 | (cp & 0x3F));
+    }
+    return 0;
+}
+
+static char *convert_iso2022jp_to_utf8(const unsigned char *raw, size_t raw_len,
+                                        size_t *out_len) {
+    enum {
+        ISO2022_ASCII,
+        ISO2022_ROMAN,
+        ISO2022_KATAKANA,
+        ISO2022_LEAD,
+        ISO2022_TRAIL,
+        ISO2022_ESCAPE_START,
+        ISO2022_ESCAPE
+    } state = ISO2022_ASCII, output_state = ISO2022_ASCII;
+
+    size_t cap = raw_len * 3 + 4;
+    char *out = (char *)malloc(cap);
+    if (!out) return NULL;
+    size_t olen = 0;
+
+    int output_flag = 0;
+    unsigned char lead = 0;
+    size_t i = 0;
+
+    while (i <= raw_len) {
+        /* At i == raw_len, we process EOF (byte = -1 sentinel) */
+        int is_eof = (i == raw_len);
+        unsigned char byte = is_eof ? 0 : raw[i];
+
+        switch (state) {
+        case ISO2022_ASCII:
+            if (is_eof) goto done;
+            if (byte == 0x1B) {
+                state = ISO2022_ESCAPE_START;
+                i++;
+                break;
+            }
+            if (byte <= 0x7F && byte != 0x0E && byte != 0x0F) {
+                output_flag = 1;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, byte) < 0)
+                    goto fail;
+                i++;
+            } else {
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                i++;
+            }
+            break;
+
+        case ISO2022_ROMAN:
+            if (is_eof) goto done;
+            if (byte == 0x1B) {
+                state = ISO2022_ESCAPE_START;
+                i++;
+                break;
+            }
+            if (byte == 0x5C) {
+                output_flag = 1;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0x00A5) < 0)
+                    goto fail;
+                i++;
+            } else if (byte == 0x7E) {
+                output_flag = 1;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0x203E) < 0)
+                    goto fail;
+                i++;
+            } else if (byte <= 0x7F && byte != 0x0E && byte != 0x0F) {
+                output_flag = 1;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, byte) < 0)
+                    goto fail;
+                i++;
+            } else {
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                i++;
+            }
+            break;
+
+        case ISO2022_KATAKANA:
+            if (is_eof) goto done;
+            if (byte == 0x1B) {
+                state = ISO2022_ESCAPE_START;
+                i++;
+                break;
+            }
+            if (byte >= 0x21 && byte <= 0x5F) {
+                output_flag = 1;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFF61 - 0x21 + byte) < 0)
+                    goto fail;
+                i++;
+            } else {
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                i++;
+            }
+            break;
+
+        case ISO2022_LEAD:
+            if (is_eof) goto done;
+            if (byte == 0x1B) {
+                state = ISO2022_ESCAPE_START;
+                i++;
+                break;
+            }
+            if (byte >= 0x21 && byte <= 0x7E) {
+                output_flag = 0;
+                lead = byte;
+                state = ISO2022_TRAIL;
+                i++;
+            } else {
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                i++;
+            }
+            break;
+
+        case ISO2022_TRAIL:
+            if (is_eof) {
+                /* Incomplete two-byte sequence at EOF */
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                goto done;
+            }
+            if (byte == 0x1B) {
+                /* ESC interrupts trail byte — emit error for lead */
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                state = ISO2022_ESCAPE_START;
+                i++;
+                break;
+            }
+            if (byte >= 0x21 && byte <= 0x7E) {
+                unsigned int pointer = (unsigned int)(lead - 0x21) * 94 + (byte - 0x21);
+                unsigned int cp = 0xFFFD;
+                if (pointer < JIS0208_TABLE_SIZE && jis0208_table[pointer] != 0) {
+                    cp = jis0208_table[pointer];
+                }
+                if (iso2022jp_emit_cp(&out, &olen, &cap, cp) < 0)
+                    goto fail;
+                state = ISO2022_LEAD;
+                output_flag = (cp != 0xFFFD) ? 1 : 0;
+                i++;
+            } else {
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                state = ISO2022_LEAD;
+                output_flag = 0;
+                i++;
+            }
+            break;
+
+        case ISO2022_ESCAPE_START: {
+            if (is_eof) {
+                /* ESC at EOF: emit error, done */
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                goto done;
+            }
+            if (byte == 0x24 || byte == 0x28) {
+                lead = byte;
+                state = ISO2022_ESCAPE;
+                i++;
+            } else {
+                /* Not a recognized escape — output error, re-process byte
+                 * in output_state */
+                output_flag = 0;
+                state = output_state;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                /* Don't advance i — re-process this byte */
+            }
+            break;
+        }
+
+        case ISO2022_ESCAPE: {
+            if (is_eof) {
+                /* Incomplete escape at EOF */
+                output_flag = 0;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                goto done;
+            }
+            int recognized = 0;
+            enum { T_NONE, T_ASCII, T_ROMAN, T_KATAKANA, T_LEAD } target = T_NONE;
+
+            if (lead == 0x28 && byte == 0x42) {
+                target = T_ASCII;
+                recognized = 1;
+            } else if (lead == 0x28 && byte == 0x4A) {
+                target = T_ROMAN;
+                recognized = 1;
+            } else if (lead == 0x28 && byte == 0x49) {
+                target = T_KATAKANA;
+                recognized = 1;
+            } else if (lead == 0x24 && (byte == 0x40 || byte == 0x42)) {
+                target = T_LEAD;
+                recognized = 1;
+            }
+
+            if (recognized) {
+                switch (target) {
+                case T_ASCII:    state = ISO2022_ASCII;    break;
+                case T_ROMAN:    state = ISO2022_ROMAN;    break;
+                case T_KATAKANA: state = ISO2022_KATAKANA; break;
+                case T_LEAD:     state = ISO2022_LEAD;     break;
+                default: break;
+                }
+                output_state = state;
+                /* If output_flag is set, emit U+FFFD per spec
+                 * (security measure for state transitions) */
+                if (output_flag) {
+                    if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                        goto fail;
+                    output_flag = 0;
+                }
+                i++;
+            } else {
+                /* Unrecognized escape sequence — error, prepend lead+byte
+                 * back to stream. Actually per WHATWG spec: set output_flag = 0,
+                 * restore state to output_state, and re-process the byte
+                 * after the ESC (which is lead) and then this byte.
+                 * We handle by emitting U+FFFD and backing up to re-process
+                 * lead and byte in output_state. */
+                output_flag = 0;
+                state = output_state;
+                if (iso2022jp_emit_cp(&out, &olen, &cap, 0xFFFD) < 0)
+                    goto fail;
+                /* Back up: re-process 'lead' byte and current byte.
+                 * We need to re-process two bytes. Since we consumed the
+                 * ESC and the lead already, we back i by 1 to re-process
+                 * from lead. Actually lead was consumed when entering
+                 * ESCAPE state, and byte hasn't been consumed yet.
+                 * We need to re-process lead byte (i-1) and current byte (i).
+                 * So back up i by 1. */
+                i--; /* re-process from lead byte */
+            }
+            break;
+        }
+        } /* switch */
+    } /* while */
+
+done:
+    out[olen] = '\0';
+    *out_len = olen;
+    return out;
+
+fail:
+    free(out);
+    return NULL;
+}
+
 #ifdef HAVE_ICONV
 static char *convert_with_iconv(const unsigned char *raw, size_t raw_len,
                                  const char *iconv_name, size_t *out_len) {
@@ -770,6 +1059,10 @@ static char *convert_to_utf8(const unsigned char *raw, size_t raw_len,
         return convert_utf16_to_utf8(raw, raw_len, 1, out_len);
     if (strcmp(canonical, "UTF-16LE") == 0)
         return convert_utf16_to_utf8(raw, raw_len, 0, out_len);
+
+    /* ISO-2022-JP: built-in state machine decoder */
+    if (strcmp(canonical, "ISO-2022-JP") == 0)
+        return convert_iso2022jp_to_utf8(raw, raw_len, out_len);
 
 #ifdef HAVE_ICONV
     {

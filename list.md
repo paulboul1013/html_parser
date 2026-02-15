@@ -160,7 +160,7 @@
 | after after body | ✅ | |
 | after after frameset |🟥 | |
 
-**小結**：23 種模式中 15 種完整實作（含 in table text），4 種以合併方式實作（功能等效），4 種未實作。未實作的多為罕用（frameset × 3）或進階功能（in head noscript）。
+**小結**：23 種模式中 16 種完整實作（含 in table text、in head noscript），4 種以合併方式實作（功能等效），3 種為已淘汰的 frameset 系列。
 
 ### 2.2 Tree Construction 演算法
 
@@ -240,13 +240,13 @@
 
 | 功能 | 狀態 | 備註 |
 |------|------|------|
-| `build_fragment_from_input(input, context_tag)` API | ✅ | |
+| `build_fragment_from_input(input, context_tag, encoding, confidence, change_encoding)` API | ✅ | |
 | Context element 決定 tokenizer 狀態 | ✅ | |
 | Context element 決定 insertion mode | ✅ | |
 | Context element 不出現在輸出 | ✅ | |
 | `<html>` 作為 context：form element pointer 設定 | ✅ | `form_element_pointer = NULL`（規範行為） |
 | `<template>` 作為 context：template insertion modes stack | ✅ | `context=template` 會建立 `content` wrapper |
-| Context element 的 encoding 繼承 | ⬜ | |
+| Context element 的 encoding 繼承 | ✅ | WHATWG §14.4 step 5: `build_fragment_from_input()` 接受 `encoding` + `confidence` 參數 |
 
 ---
 
@@ -267,7 +267,7 @@
 | `x-user-defined` 轉換 | ✅ | |
 | Encoding confidence（certain / tentative / irrelevant） | ✅ | |
 | Re-encoding（meta 與 BOM 不符時的重新解碼） | ✅ | WHATWG §13.2.3.5: TENTATIVE 時偵測 meta charset 觸發重新解碼 |
-| `ISO-2022-JP` encoder state machine | ⬜ | iconv 處理，未自行實作 |
+| `ISO-2022-JP` decoder state machine | ✅ | 內建 WHATWG §15.2 狀態機解碼器（ASCII/Roman/Katakana/Lead/Trail/Escape），含 JIS X 0208 查找表、output flag 安全機制 |
 
 ---
 
@@ -397,8 +397,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 | Formatting / AFE | 10/10 | 0 | 0 | 100% |
 | Scope | 6/6 | 0 | 0 | 100% |
 | Auto-close | 11/11 | 0 | 0 | 100% |
-| Fragment Parsing | 6/7 | 0 | 1 | 86% |
-| Encoding Sniffing | 12/14 | 0 | 2 | 86% |
+| Fragment Parsing | 7/7 | 0 | 0 | 100% |
+| Encoding Sniffing | 14/14 | 0 | 0 | 100% |
 | Serialization | 10/11 | 0 | 1 | 91% |
 | Foreign Content | 9/9 | 0 | 0 | 100% |
 | Form | 3/3 | 0 | 0 | 100% |
@@ -406,8 +406,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 
 ### 整體評估
 
-- **核心 HTML 解析（含 SVG/MathML）**：~95% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。Tokenizer 狀態機 100% 完成，Scope 100% 完成，Formatting 100% 完成。
-- **完全符合 WHATWG 規範（含所有邊緣情況）**：~85% 完成。
+- **核心 HTML 解析（含 SVG/MathML）**：~97% 完成。能正確解析絕大多數真實世界的 HTML 文件，包含內嵌 SVG 和 MathML。Tokenizer 100%，Scope 100%，Formatting 100%，Fragment 100%，Foreign Content 100%。
+- **完全符合 WHATWG 規範（含所有邊緣情況）**：~90% 完成。剩餘：frameset（已淘汰）、ISO-2022-JP 自行實作、`<body>`/`<html>` 重複屬性合併。
 
 ### 已完成里程碑
 
@@ -426,6 +426,11 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 13. ✅ **`<input>` type=hidden 在 table 中的特殊處理** — 檢查 `type` 屬性（大小寫不敏感），直接插入 table 而不 foster parent
 14. ✅ **Select scope** — `has_element_in_select_scope()`，除 `optgroup`/`option` 外所有元素皆為障壁；`<select>` start/end tag 及 table element 在 select 模式中均使用
 15. ✅ **Noncharacter / surrogate / control 偵測** — `numeric_ref_adjust()` 完整實作 WHATWG §13.2.5.80：surrogate → U+FFFD，noncharacter → parse error + 保留，control → parse error + W-1252 映射/保留
+16. ✅ **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`
+17. ✅ **Stop parsing (§13.2.6.5)** — Per-mode EOF 處理、棧清理、parse error 報告
+18. ✅ **MODE_IN_HEAD_NOSCRIPT** — scripting disabled 時 `<noscript>` 在 head 中的特殊模式
+19. ✅ **Context element encoding 繼承 (§14.4 step 5)** — fragment 繼承 context document 編碼
+20. ✅ **Re-encoding (§13.2.3.5)** — TENTATIVE 時偵測 meta charset 觸發重新解碼+重新解析
 
 ### 剩餘待完成項目
 
@@ -434,5 +439,8 @@ WHATWG §13 定義了約 80 種 parse error。目前 tokenizer 階段的 error �
 3. ~~**Select scope**~~ ✅
 4. ~~**Noncharacter / surrogate 偵測**~~ ✅
 5. **`<frameset>` 模式** — 已淘汰，低優先
-6. **Generate all implied end tags thoroughly** — 額外含 `caption`, `colgroup`, `tbody` 等
-7. **Stop parsing (§13.2.6.5)** — EOF 時的完整清理步驟
+6. ~~**Generate all implied end tags thoroughly**~~ ✅ — 額外含 `caption`, `colgroup`, `tbody`, `td`, `tfoot`, `th`, `thead`, `tr`
+7. ~~**Stop parsing (§13.2.6.5)**~~ ✅ — Per-mode EOF 處理、棧清理、parse error 報告
+8. ~~**Context element encoding 繼承**~~ ✅ — WHATWG §14.4 step 5
+9. ~~**Re-encoding (§13.2.3.5)**~~ ✅ — TENTATIVE 時偵測 meta charset 觸發重新解碼
+10. ~~**MODE_IN_HEAD_NOSCRIPT**~~ ✅ — scripting disabled 時 `<noscript>` 在 head 中的特殊模式

@@ -114,6 +114,8 @@ test-encoding: parse_html
 	./parse_html tests/encoding_reenc_meta.html
 	@echo "=== Encoding: BOM vs meta (BOM wins) ==="
 	./parse_html tests/encoding_bom_vs_meta.html
+	@echo "=== Encoding: ISO-2022-JP ==="
+	./parse_html tests/encoding_iso2022jp.html
 
 test-parse-errors: parse_html
 	HTMLPARSER_PARSE_ERRORS=1 ./parse_html tests/tree_parse_errors.html
