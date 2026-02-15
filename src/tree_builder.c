@@ -28,6 +28,32 @@ static void attach_attrs(node *n, const token_attr *src, size_t count) {
     }
 }
 
+/* Merge attributes from a token onto an existing element.
+ * Only adds attributes not already present on the element (WHATWG §13.2.6.4.7). */
+static void merge_attrs(node *n, const token_attr *src, size_t count) {
+    if (!n || !src || count == 0) return;
+    for (size_t i = 0; i < count; i++) {
+        if (!src[i].name) continue;
+        /* Check if attribute already exists */
+        int found = 0;
+        for (size_t j = 0; j < n->attr_count; j++) {
+            if (n->attrs[j].name && strcmp(n->attrs[j].name, src[i].name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            node_attr *new_attrs = (node_attr *)realloc(
+                n->attrs, (n->attr_count + 1) * sizeof(node_attr));
+            if (!new_attrs) return;
+            n->attrs = new_attrs;
+            n->attrs[n->attr_count].name  = strdup(src[i].name);
+            n->attrs[n->attr_count].value = src[i].value ? strdup(src[i].value) : NULL;
+            n->attr_count++;
+        }
+    }
+}
+
 /* Attach attributes with SVG attribute name adjustment */
 static void attach_attrs_svg(node *n, const token_attr *src, size_t count) {
     if (!n || !src || count == 0) return;
@@ -1499,6 +1525,8 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
     }
     if (name && strcmp(name, "html") == 0) {
         tree_parse_error("unexpected-start-tag");
+        if (!in_template && html && *html)
+            merge_attrs(*html, attrs, attr_count);
         return;
     }
     if (name && is_heading_element(name)) {
@@ -1511,6 +1539,9 @@ static void handle_in_body_start(const char *name, int self_closing, node *doc, 
         tree_parse_error("unexpected-start-tag");
         if (!in_template) {
             ensure_body(doc, st, html, body);
+            if (body && *body && st->size >= 2 &&
+                st->items[1]->name && strcmp(st->items[1]->name, "body") == 0)
+                merge_attrs(*body, attrs, attr_count);
         }
         return;
     }
@@ -2207,6 +2238,7 @@ node *build_tree_from_tokens(const token *tokens, size_t count) {
                     if (mode == MODE_BEFORE_HTML) {
                         if (t->name && strcmp(t->name, "html") == 0) {
                             html = ensure_html(doc, &st, &html);
+                            attach_attrs(html, t->attrs, t->attr_count);
                             mode = MODE_IN_HEAD;
                             break;
                         }
@@ -3177,6 +3209,7 @@ node *build_tree_from_input(const char *input, const char *encoding,
                     if (mode == MODE_BEFORE_HTML) {
                         if (t.name && strcmp(t.name, "html") == 0) {
                             html = ensure_html(doc, &st, &html);
+                            attach_attrs(html, t.attrs, t.attr_count);
                             mode = MODE_IN_HEAD;
                             break;
                         }
